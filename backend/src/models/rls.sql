@@ -1,0 +1,5 @@
+-- Placeholder for Azure SQL RLS policy.
+-- Example pattern:
+-- 1) Create a tenant access function.
+-- 2) Create security policy applying predicate to tenant-scoped tables.
+-- 3) Set SESSION_CONTEXT('tenant_id') in app per request.
