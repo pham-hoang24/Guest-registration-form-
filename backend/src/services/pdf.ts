@@ -1,4 +1,13 @@
-export const generatePdf = async (payload: Record<string, unknown>) => {
-  const content = JSON.stringify(payload, null, 2);
-  return Buffer.from(`PDF_PLACEHOLDER\n${content}\n`, "utf8");
+import { defaultPdfTemplateRegistry } from "../pdf/registry.js";
+import type { RegistrationSubmission } from "../pdf/types.js";
+
+export const DEFAULT_TEMPLATE_ID = "default";
+export const DEFAULT_TEMPLATE_VERSION = 1;
+
+export const generatePdf = async (
+  payload: RegistrationSubmission,
+  templateId: string = DEFAULT_TEMPLATE_ID,
+  templateVersion: number = DEFAULT_TEMPLATE_VERSION
+) => {
+  return defaultPdfTemplateRegistry.render(payload, templateId, templateVersion);
 };

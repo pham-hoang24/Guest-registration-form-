@@ -45,6 +45,7 @@ export type AuditEventType =
   | "token_invalid"
   | "decrypt_failed"
   | "keyvault_error"
+  | "dek_rewrapped"
   | "pdf_ready"
   | "submission_failed"
   | "retention_deleted";

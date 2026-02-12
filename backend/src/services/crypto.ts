@@ -1,42 +1,19 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { buildAadBytes } from "../crypto/aad.js";
+import { decryptAesGcm, encryptAesGcm, generateDek } from "../crypto/aesgcm.js";
+import { hashNonceCiphertextTagHex } from "../crypto/hashes.js";
 
-export const generateDek = () => randomBytes(32);
-
-export const buildAad = (parts: {
-  tenantId: string;
-  propertyId: string;
-  submissionId: string;
-  schemaVersion: number;
-  aadVersion: number;
-}) => {
-  return Buffer.from(
-    `${parts.tenantId}|${parts.propertyId}|${parts.submissionId}|${parts.schemaVersion}|${parts.aadVersion}`,
-    "utf8"
-  );
-};
+export { generateDek, buildAadBytes };
 
 export const encryptPdf = (plaintext: Buffer, aad: Buffer, dek: Buffer) => {
-  const nonce = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", dek, nonce);
-  cipher.setAAD(aad, { plaintextLength: plaintext.length });
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  const ciphertextSha256 = createHash("sha256").update(ciphertext).digest("hex");
+  const { nonce, ciphertext, tag } = encryptAesGcm(plaintext, aad, dek);
   return {
     ciphertext,
     nonce,
     tag,
-    ciphertextSha256
+    ciphertextSha256: hashNonceCiphertextTagHex(nonce, ciphertext, tag)
   };
 };
 
 export const decryptPdf = (ciphertext: Buffer, aad: Buffer, dek: Buffer, nonce: Buffer, tag: Buffer) => {
-  if (nonce.length !== 12) {
-    throw new Error("Invalid nonce length");
-  }
-  const decipher = createDecipheriv("aes-256-gcm", dek, nonce);
-  decipher.setAAD(aad, { plaintextLength: ciphertext.length });
-  decipher.setAuthTag(tag);
-  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return plaintext;
+  return decryptAesGcm(ciphertext, aad, dek, nonce, tag);
 };

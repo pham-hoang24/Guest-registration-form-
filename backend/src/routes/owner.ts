@@ -5,7 +5,10 @@ import { writeAudit } from "../services/audit.js";
 import { canReadSubmission } from "../services/authz.js";
 import { db } from "../services/db.js";
 import { unwrapDekWithKeyVault } from "../services/keyVault.js";
-import { buildAad, decryptPdf } from "../services/crypto.js";
+import { buildAadBytes } from "../crypto/aad.js";
+import { decryptAesGcm } from "../crypto/aesgcm.js";
+import { assertHashMatch, hashNonceCiphertextTagHex, sha256Hex } from "../crypto/hashes.js";
+import { parseEncryptedPdfRecord } from "../storage/encryptedPdfRecord.js";
 import { storage } from "../services/storage.js";
 import type { OwnerIdentity } from "../types.js";
 
@@ -70,29 +73,45 @@ export const ownerRouter = () => {
       userAgent: req.get("user-agent") ?? undefined
     });
 
-    const blob = await storage.get(submission.blobPath);
-    const meta = db.getEncryptionMetadata(submission.id);
-    if (!blob || !meta) {
+    const record = db.getEncryptedPdfRecord(submission.id);
+    if (!record) {
       return res.status(404).json({ error: "missing_blob" });
     }
 
     try {
-      const dek = await unwrapDekWithKeyVault(submission.wrappedDek);
-      const aad = buildAad({
-        tenantId: submission.tenantId,
-        propertyId: submission.propertyId,
-        submissionId: submission.id,
-        schemaVersion: meta.schemaVersion,
-        aadVersion: meta.aadVersion
-      });
-      const plaintext = decryptPdf(
-        blob.ciphertext,
-        aad,
-        dek,
-        Buffer.from(meta.nonce, "base64"),
-        Buffer.from(meta.tag, "base64")
+      const maxPdfBytes = Number(process.env.MAX_PDF_BYTES || 10 * 1024 * 1024);
+      const parsedRecord = parseEncryptedPdfRecord(record);
+      const recordBlob = await storage.get(parsedRecord.blobPath);
+      if (!recordBlob) {
+        return res.status(404).json({ error: "missing_blob" });
+      }
+      if (parsedRecord.contentLength > maxPdfBytes) {
+        return res.status(413).json({ error: "pdf_too_large" });
+      }
+      const dek = await unwrapDekWithKeyVault(
+        parsedRecord.wrappedDekB64,
+        parsedRecord.kekKeyId,
+        parsedRecord.kekKeyVersion
       );
-      res.setHeader("Content-Type", meta.contentType);
+      const aad = buildAadBytes({
+        tenantId: parsedRecord.tenantId,
+        propertyId: parsedRecord.propertyId,
+        submissionId: parsedRecord.submissionId,
+        templateId: parsedRecord.templateId,
+        templateVersion: parsedRecord.templateVersion,
+        pdfSchemaVersion: parsedRecord.pdfSchemaVersion,
+        cryptoVersion: parsedRecord.cryptoVersion
+      });
+      if (parsedRecord.aadSha256Hex) {
+        const aadHash = sha256Hex(aad);
+        assertHashMatch(parsedRecord.aadSha256Hex, aadHash, "AAD hash");
+      }
+      const nonce = Buffer.from(parsedRecord.nonceB64, "base64");
+      const tag = Buffer.from(parsedRecord.tagB64, "base64");
+      const ciphertextHash = hashNonceCiphertextTagHex(nonce, recordBlob.ciphertext, tag);
+      assertHashMatch(parsedRecord.ciphertextSha256Hex, ciphertextHash, "Ciphertext hash");
+      const plaintext = decryptAesGcm(recordBlob.ciphertext, aad, dek, nonce, tag);
+      res.setHeader("Content-Type", parsedRecord.contentType);
       res.setHeader("Content-Disposition", `attachment; filename="submission-${submission.id}.pdf"`);
       res.status(200).send(plaintext);
       writeAudit("download_succeeded", {

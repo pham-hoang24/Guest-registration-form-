@@ -25,6 +25,10 @@ class InMemoryStorage {
     if (!blob) return null;
     return Readable.from(blob.ciphertext);
   }
+
+  reset() {
+    this.blobs.clear();
+  }
 }
 
 export const storage = new InMemoryStorage();

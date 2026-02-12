@@ -1,27 +1,24 @@
-import { createHmac } from "node:crypto";
+import { KeyVaultKekAdapter } from "../crypto/keyVaultKek.js";
 
-const wrapSecret = process.env.KEY_VAULT_WRAP_SECRET || "dev-wrap-secret";
-const keyId = process.env.KEY_VAULT_KEY_ID || "kv-key";
-const keyVersion = process.env.KEY_VAULT_KEY_VERSION || "v1";
+let adapter: KeyVaultKekAdapter | null = null;
 
-export const getKeyInfo = () => ({
-  keyId,
-  keyVersion
-});
-
-export const wrapDekWithKeyVault = async (dek: Buffer) => {
-  const mac = createHmac("sha256", wrapSecret).update(dek).digest("hex");
-  const wrapped = Buffer.from(`${mac}:${dek.toString("base64")}`, "utf8").toString("base64");
-  return { wrappedDek: wrapped, keyId, keyVersion };
+const getAdapter = () => {
+  if (!adapter) {
+    adapter = KeyVaultKekAdapter.fromEnv();
+  }
+  return adapter;
 };
 
-export const unwrapDekWithKeyVault = async (wrappedDek: string) => {
-  const decoded = Buffer.from(wrappedDek, "base64").toString("utf8");
-  const [mac, dekB64] = decoded.split(":");
-  const dek = Buffer.from(dekB64, "base64");
-  const expected = createHmac("sha256", wrapSecret).update(dek).digest("hex");
-  if (expected !== mac) {
-    throw new Error("Wrapped DEK integrity check failed");
-  }
-  return dek;
+export const wrapDekWithKeyVault = async (dek: Buffer) => {
+  const wrapped = await getAdapter().wrapDek(dek);
+  return {
+    wrappedDek: wrapped.wrappedDek.toString("base64"),
+    keyId: wrapped.kekKeyId,
+    keyVersion: wrapped.kekKeyVersion
+  };
+};
+
+export const unwrapDekWithKeyVault = async (wrappedDek: string, kekKeyId?: string, kekKeyVersion?: string) => {
+  const wrapped = Buffer.from(wrappedDek, "base64");
+  return getAdapter().unwrapDek(wrapped, kekKeyId ?? "", kekKeyVersion);
 };
