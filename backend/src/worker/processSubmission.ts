@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "../services/db.js";
 import { storage } from "../services/storage.js";
 import { writeAudit } from "../services/audit.js";
+import { decryptPayload } from "../services/payloadEncryption.js";
 import { DEFAULT_TEMPLATE_ID, DEFAULT_TEMPLATE_VERSION, generatePdf } from "../services/pdf.js";
 import { buildAadBytes } from "../crypto/aad.js";
 import { CRYPTO_VERSION, encryptAesGcm, generateDek } from "../crypto/aesgcm.js";
@@ -17,9 +18,10 @@ type TemplateRef = {
   templateVersion: number;
 };
 
-type SubmissionJob = {
+/** Job type: submissionId only. Optional payload for backward compatibility in tests. */
+export type SubmissionJob = {
   submissionId: string;
-  payload: RegistrationSubmission;
+  payload?: RegistrationSubmission;
   templateRef?: TemplateRef;
 };
 
@@ -58,12 +60,72 @@ export const processSubmissionJob = async (job: SubmissionJob) => {
     }
   }
 
+  let payload: RegistrationSubmission;
+  if (job.payload !== undefined) {
+    payload = job.payload;
+  } else {
+    const encryptedRecord = await db.getPayload(
+      submission.tenantId,
+      submission.propertyId,
+      submission.id
+    );
+    if (!encryptedRecord) {
+      const message = "missing_payload";
+      db.updateSubmission(submission.id, { status: "FAILED", lastError: message });
+      writeAudit("submission_failed", {
+        correlationId,
+        actorType: "system",
+        actorId: "worker",
+        tenantId: submission.tenantId,
+        propertyId: submission.propertyId,
+        submissionId: submission.id,
+        details: { reason: message }
+      });
+      return;
+    }
+    try {
+      const plaintext = await decryptPayload(
+        encryptedRecord,
+        {
+          tenantId: submission.tenantId,
+          propertyId: submission.propertyId,
+          submissionId: submission.id
+        },
+        getKekAdapter()
+      );
+      payload = JSON.parse(plaintext) as RegistrationSubmission;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "payload_decrypt_failed";
+      const latest = db.getSubmissionWithVersion(submission.id);
+      const updates = {
+        status: "FAILED" as const,
+        lastError: message,
+        attemptCount: submission.attemptCount + 1
+      };
+      if (latest) {
+        db.compareAndSwapSubmission(submission.id, latest.version, updates);
+      } else {
+        db.updateSubmission(submission.id, updates);
+      }
+      writeAudit("submission_failed", {
+        correlationId,
+        actorType: "system",
+        actorId: "worker",
+        tenantId: submission.tenantId,
+        propertyId: submission.propertyId,
+        submissionId: submission.id,
+        details: { reason: message }
+      });
+      return;
+    }
+  }
+
   try {
     const templateRef = job.templateRef ?? {
       templateId: DEFAULT_TEMPLATE_ID,
       templateVersion: DEFAULT_TEMPLATE_VERSION
     };
-    const pdfResult = await generatePdf(job.payload, templateRef.templateId, templateRef.templateVersion);
+    const pdfResult = await generatePdf(payload, templateRef.templateId, templateRef.templateVersion);
     const dek = generateDek();
     const aadBytes = buildAadBytes({
       tenantId: submission.tenantId,

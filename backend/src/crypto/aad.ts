@@ -11,7 +11,26 @@ export type AadSchemaV1 = {
   cryptoVersion: string;
 };
 
+export type PayloadAadSchemaV1 = {
+  purpose: "payload";
+  aadVersion: string;
+  tenantId: string;
+  propertyId: string;
+  submissionId: string;
+  schemaVersion: number;
+  cryptoVersion: string;
+};
+
 type BuildAadInput = Omit<AadSchemaV1, "aadVersion"> & { aadVersion?: typeof AAD_VERSION };
+
+export type BuildPayloadAadInput = {
+  aadVersion?: string;
+  tenantId: string;
+  propertyId: string;
+  submissionId: string;
+  schemaVersion: number;
+  cryptoVersion: string;
+};
 
 export const buildAadBytes = (input: BuildAadInput) => {
   const aad: AadSchemaV1 = {
@@ -22,6 +41,20 @@ export const buildAadBytes = (input: BuildAadInput) => {
     templateId: input.templateId,
     templateVersion: input.templateVersion,
     pdfSchemaVersion: input.pdfSchemaVersion,
+    cryptoVersion: input.cryptoVersion
+  };
+  const canonical = canonicalizeJson(aad);
+  return Buffer.from(canonical, "utf8");
+};
+
+export const buildPayloadAadBytes = (input: BuildPayloadAadInput) => {
+  const aad: PayloadAadSchemaV1 = {
+    purpose: "payload",
+    aadVersion: input.aadVersion ?? AAD_VERSION,
+    tenantId: input.tenantId,
+    propertyId: input.propertyId,
+    submissionId: input.submissionId,
+    schemaVersion: input.schemaVersion,
     cryptoVersion: input.cryptoVersion
   };
   const canonical = canonicalizeJson(aad);

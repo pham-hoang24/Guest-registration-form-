@@ -66,12 +66,20 @@ CREATE TABLE submissions (
   CONSTRAINT fk_submissions_property FOREIGN KEY (property_id) REFERENCES properties(id)
 );
 
--- Optional encrypted raw payload storage
+-- Optional encrypted raw payload storage (per-submission DEK + KEK; AAD with purpose "payload")
 CREATE TABLE submission_payloads (
   submission_id UNIQUEIDENTIFIER PRIMARY KEY,
   tenant_id UNIQUEIDENTIFIER NOT NULL,
   property_id UNIQUEIDENTIFIER NOT NULL,
-  payload_ciphertext VARBINARY(MAX) NULL,
+  payload_ciphertext VARBINARY(MAX) NOT NULL,
+  nonce VARBINARY(12) NOT NULL,
+  tag VARBINARY(16) NOT NULL,
+  wrapped_dek VARBINARY(500) NOT NULL,
+  kek_key_id NVARCHAR(200) NOT NULL,
+  kek_key_version NVARCHAR(100) NOT NULL,
+  aad_version INT NOT NULL DEFAULT 1,
+  schema_version INT NOT NULL DEFAULT 1,
+  ciphertext_sha256 CHAR(64) NOT NULL,
   created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
   CONSTRAINT fk_payload_submission FOREIGN KEY (submission_id) REFERENCES submissions(id)
 );

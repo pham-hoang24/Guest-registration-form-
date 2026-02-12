@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { AuditLog, EncryptionMetadata, OwnerIdentity, SubmissionRecord, SubmissionStatus } from "../types.js";
 import type { EncryptedPdfRecord } from "../storage/encryptedPdfRecord.js";
+import type { EncryptedPayloadRecord } from "./payloadEncryption.js";
+import type { PayloadStore } from "./payloadStore.js";
+import { InMemoryPayloadStore } from "./payloadStore.js";
 
 type GuestTokenJti = {
   jti: string;
@@ -25,6 +28,9 @@ class InMemoryDb {
   audits: AuditLog[] = [];
   guestTokenJtis = new Map<string, GuestTokenJti>();
   memberships: PropertyMembership[] = [];
+
+  /** Payload store: in-memory for dev/tests; replace with SQL implementation for production. */
+  payloadStore: PayloadStore = new InMemoryPayloadStore();
 
   createSubmission(input: Omit<SubmissionRecord, "createdAt" | "updatedAt">) {
     const now = new Date().toISOString();
@@ -143,6 +149,23 @@ class InMemoryDb {
     return this.updateSubmission(id, { status, lastError: lastError ?? null });
   }
 
+  async insertPayload(
+    tenantId: string,
+    propertyId: string,
+    submissionId: string,
+    record: EncryptedPayloadRecord
+  ): Promise<void> {
+    await this.payloadStore.insertPayload(tenantId, propertyId, submissionId, record);
+  }
+
+  async getPayload(
+    tenantId: string,
+    propertyId: string,
+    submissionId: string
+  ): Promise<EncryptedPayloadRecord | null> {
+    return this.payloadStore.getPayload(tenantId, propertyId, submissionId);
+  }
+
   reset() {
     this.submissions.clear();
     this.encryptionMetadata.clear();
@@ -152,6 +175,9 @@ class InMemoryDb {
     this.audits = [];
     this.guestTokenJtis.clear();
     this.memberships = [];
+    if (this.payloadStore instanceof InMemoryPayloadStore) {
+      this.payloadStore.reset();
+    }
   }
 
   private bumpSubmissionVersion(id: string) {
