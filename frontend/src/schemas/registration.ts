@@ -2,26 +2,73 @@ import { z } from 'zod'
 
 const documentTypeEnum = z.enum(['passport', 'id', 'other'])
 
-export const RegistrationPayloadV1Schema = z
-  .object({
-    schemaVersion: z.literal('v1'),
-    fullName: z.string().min(1, 'Full name is required'),
-    nationality: z.string().optional(),
-    documentType: documentTypeEnum,
-    documentNumber: z.string().min(1, 'Document number is required'),
-    dateOfBirth: z.string().optional(),
-    checkInDate: z.string().min(1, 'Check-in date is required'),
-    checkOutDate: z.string().min(1, 'Check-out date is required'),
-    phone: z.string().optional(),
-    email: z.string().email().optional().or(z.literal('')),
-    address: z.string().optional(),
-  })
+const PASSPORT_REGEX = /^[A-Za-z0-9]{6,12}$/
+const FINNISH_ID_REGEX = /^\d{6}[-+ABCDEFUVWXY]\d{3}[0-9A-Y]$/
+const OTHER_DOC_REGEX = /^[A-Za-z0-9]{1,20}$/
+
+function isValidFinnishId(value: string): boolean {
+  if (!FINNISH_ID_REGEX.test(value)) return false
+  const day = parseInt(value.slice(0, 2), 10)
+  const month = parseInt(value.slice(2, 4), 10)
+  if (month < 1 || month > 12) return false
+  if (day < 1 || day > 31) return false
+  return true
+}
+
+const baseSchema = z.object({
+  schemaVersion: z.literal('v1'),
+  fullName: z.string().min(1, 'Full name is required'),
+  nationality: z.string().optional(),
+  documentType: documentTypeEnum,
+  documentNumber: z.string().min(1, 'Document number is required'),
+  dateOfBirth: z.string().optional(),
+  checkInDate: z.string().min(1, 'Check-in date is required'),
+  checkOutDate: z.string().min(1, 'Check-out date is required'),
+  phoneCountryCode: z.string().optional(),
+  phoneNumber: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.union([z.string().email(), z.literal('')]).optional(),
+})
+
+export const RegistrationPayloadV1Schema = baseSchema
   .refine(
     (data) => {
       if (!data.checkInDate || !data.checkOutDate) return true
       return new Date(data.checkOutDate) >= new Date(data.checkInDate)
     },
     { message: 'Check-out date must be on or after check-in date', path: ['checkOutDate'] }
+  )
+  .superRefine((data, ctx) => {
+    const num = data.documentNumber?.trim() ?? ''
+    if (!num) return
+    let valid = false
+    let msg = 'Invalid document number'
+    switch (data.documentType) {
+      case 'passport':
+        valid = PASSPORT_REGEX.test(num)
+        msg = 'Passport number must be 6–12 alphanumeric characters'
+        break
+      case 'id':
+        valid = isValidFinnishId(num)
+        msg = 'Finnish ID must be 11 characters (DDMMYYXNNNC format)'
+        break
+      case 'other':
+        valid = OTHER_DOC_REGEX.test(num)
+        msg = 'Document number must be 1–20 alphanumeric characters'
+        break
+    }
+    if (!valid) ctx.addIssue({ code: 'custom', message: msg, path: ['documentNumber'] })
+  })
+  .refine(
+    (data) => {
+      const hasCode = (data.phoneCountryCode ?? '').trim().length > 0
+      const hasNum = (data.phoneNumber ?? '').trim().replace(/\D/g, '').length > 0
+      if (!hasCode && !hasNum) return true
+      if (!hasCode || !hasNum) return false
+      const digits = (data.phoneNumber ?? '').replace(/\D/g, '')
+      return digits.length >= 5 && digits.length <= 15
+    },
+    { message: 'Provide both country code and number; number should be 5–15 digits (omit leading 0)', path: ['phoneNumber'] }
   )
 
 export type RegistrationPayloadV1 = z.infer<typeof RegistrationPayloadV1Schema>
@@ -34,9 +81,9 @@ export interface FormState {
   dateOfBirth: string
   checkInDate: string
   checkOutDate: string
-  phone: string
+  phoneCountryCode: string
+  phoneNumber: string
   email: string
-  address: string
 }
 
 export const defaultFormState: FormState = {
@@ -47,9 +94,19 @@ export const defaultFormState: FormState = {
   dateOfBirth: '',
   checkInDate: '',
   checkOutDate: '',
-  phone: '',
+  phoneCountryCode: '+358',
+  phoneNumber: '',
   email: '',
-  address: '',
+}
+
+/** Build object for schema validation (includes phoneCountryCode/phoneNumber) */
+export function formToValidationInput(form: FormState) {
+  const base = formToPayload(form)
+  return {
+    ...base,
+    phoneCountryCode: form.phoneCountryCode,
+    phoneNumber: form.phoneNumber,
+  }
 }
 
 export function formToPayload(form: FormState): RegistrationPayloadV1 {
@@ -63,9 +120,10 @@ export function formToPayload(form: FormState): RegistrationPayloadV1 {
   }
   if (form.nationality.trim()) payload.nationality = form.nationality.trim()
   if (form.dateOfBirth.trim()) payload.dateOfBirth = form.dateOfBirth.trim()
-  if (form.phone.trim()) payload.phone = form.phone.trim()
+  const code = form.phoneCountryCode.trim()
+  const num = form.phoneNumber.trim().replace(/\D/g, '')
+  if (code && num) payload.phone = `${code}${num}`
   if (form.email.trim()) payload.email = form.email.trim()
-  if (form.address.trim()) payload.address = form.address.trim()
   return payload
 }
 

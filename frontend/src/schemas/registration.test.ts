@@ -82,15 +82,15 @@ describe('RegistrationPayloadV1Schema', () => {
     const payload = {
       schemaVersion: 'v1',
       fullName: 'John Doe',
-      nationality: 'US',
+      nationality: 'FI',
       documentType: 'passport',
       documentNumber: 'AB123456',
       dateOfBirth: '1990-01-01',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
-      phone: '+1234567890',
+      phoneCountryCode: '+358',
+      phoneNumber: '401234567',
       email: 'john@example.com',
-      address: '123 Main St',
     }
     const result = RegistrationPayloadV1Schema.safeParse(payload)
     expect(result.success).toBe(true)
@@ -102,15 +102,15 @@ describe('formToPayload', () => {
     const form = {
       ...defaultFormState,
       fullName: 'Jane',
-      documentType: 'id' as const,
-      documentNumber: '123',
+      documentType: 'passport' as const,
+      documentNumber: 'AB12345',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
     }
     const payload = formToPayload(form)
     expect(payload.schemaVersion).toBe('v1')
     expect(payload.fullName).toBe('Jane')
-    expect(payload.documentNumber).toBe('123')
+    expect(payload.documentNumber).toBe('AB12345')
     expect(payload.checkInDate).toBe('2025-02-15')
   })
 
@@ -119,10 +119,11 @@ describe('formToPayload', () => {
       ...defaultFormState,
       fullName: 'Jane',
       documentType: 'passport' as const,
-      documentNumber: '123',
+      documentNumber: 'AB12345',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
-      phone: '',
+      phoneCountryCode: '',
+      phoneNumber: '',
       email: '',
     }
     const payload = formToPayload(form)
