@@ -351,6 +351,16 @@ export function Register() {
           error={fieldErrors.email}
           autoComplete="email"
         />
+        <TextField
+          id="address"
+          label="Residential address"
+          value={form.address}
+          onChange={(e) => update({ address: e.target.value })}
+          onBlur={() => validate()}
+          error={fieldErrors.address}
+          autoComplete="street-address"
+          required
+        />
 
         <div className="sticky bottom-0 mt-2 flex justify-end bg-gray-50 pt-4 pb-2">
           <Button type="submit" loading={submitting} disabled={submitting}>

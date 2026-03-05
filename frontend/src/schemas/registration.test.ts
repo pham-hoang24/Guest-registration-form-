@@ -15,6 +15,7 @@ describe('RegistrationPayloadV1Schema', () => {
       documentNumber: 'AB123456',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
+      address: 'Street 1, 00100 Helsinki',
     }
     const result = RegistrationPayloadV1Schema.safeParse(payload)
     expect(result.success).toBe(true)
@@ -28,6 +29,7 @@ describe('RegistrationPayloadV1Schema', () => {
       documentNumber: 'AB123456',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
+      address: 'Street 1, 00100 Helsinki',
     }
     const result = RegistrationPayloadV1Schema.safeParse(payload)
     expect(result.success).toBe(false)
@@ -44,6 +46,7 @@ describe('RegistrationPayloadV1Schema', () => {
       documentNumber: '',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
+      address: 'Street 1, 00100 Helsinki',
     }
     const result = RegistrationPayloadV1Schema.safeParse(payload)
     expect(result.success).toBe(false)
@@ -57,6 +60,7 @@ describe('RegistrationPayloadV1Schema', () => {
       documentNumber: 'AB123456',
       checkInDate: '2025-02-17',
       checkOutDate: '2025-02-15',
+      address: 'Street 1, 00100 Helsinki',
     }
     const result = RegistrationPayloadV1Schema.safeParse(payload)
     expect(result.success).toBe(false)
@@ -73,24 +77,54 @@ describe('RegistrationPayloadV1Schema', () => {
       documentNumber: 'AB123456',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-15',
+      address: 'Street 1, 00100 Helsinki',
     }
     const result = RegistrationPayloadV1Schema.safeParse(payload)
     expect(result.success).toBe(true)
   })
 
-  it('accepts optional fields', () => {
+  it('accepts optional fields (non-Nordic)', () => {
     const payload = {
       schemaVersion: 'v1',
       fullName: 'John Doe',
-      nationality: 'FI',
+      nationality: 'US',
       documentType: 'passport',
       documentNumber: 'AB123456',
       dateOfBirth: '1990-01-01',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
+      address: 'Street 1, 00100 Helsinki',
       phoneCountryCode: '+358',
       phoneNumber: '401234567',
       email: 'john@example.com',
+    }
+    const result = RegistrationPayloadV1Schema.safeParse(payload)
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts Finnish nationality with valid henkilötunnus', () => {
+    const payload = {
+      schemaVersion: 'v1',
+      fullName: 'Matti Meikäläinen',
+      nationality: 'FI',
+      documentType: 'id',
+      documentNumber: '010190-123A',
+      checkInDate: '2025-02-15',
+      checkOutDate: '2025-02-17',
+      address: 'Katu 1, 00100 Helsinki',
+    }
+    const result = RegistrationPayloadV1Schema.safeParse(payload)
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts Nordic (non-Finnish) without travel document', () => {
+    const payload = {
+      schemaVersion: 'v1',
+      fullName: 'Anna Andersson',
+      nationality: 'SE',
+      checkInDate: '2025-02-15',
+      checkOutDate: '2025-02-17',
+      address: 'Storgatan 1, 111 23 Stockholm',
     }
     const result = RegistrationPayloadV1Schema.safeParse(payload)
     expect(result.success).toBe(true)
@@ -106,12 +140,14 @@ describe('formToPayload', () => {
       documentNumber: 'AB12345',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
+      address: 'Street 1, City',
     }
     const payload = formToPayload(form)
     expect(payload.schemaVersion).toBe('v1')
     expect(payload.fullName).toBe('Jane')
     expect(payload.documentNumber).toBe('AB12345')
     expect(payload.checkInDate).toBe('2025-02-15')
+    expect(payload.address).toBe('Street 1, City')
   })
 
   it('omits empty optional fields', () => {
@@ -122,6 +158,7 @@ describe('formToPayload', () => {
       documentNumber: 'AB12345',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
+      address: 'Street 1',
       phoneCountryCode: '',
       phoneNumber: '',
       email: '',
@@ -141,6 +178,7 @@ describe('zodErrorsToFieldErrors', () => {
       documentNumber: '',
       checkInDate: '2025-02-15',
       checkOutDate: '2025-02-17',
+      address: 'Street 1',
     })
     expect(result.success).toBe(false)
     if (!result.success) {

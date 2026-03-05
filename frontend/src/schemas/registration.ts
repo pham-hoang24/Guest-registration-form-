@@ -15,12 +15,21 @@ function isValidFinnishId(value: string): boolean {
   return true
 }
 
+/** Nordic countries: Finnish ID or no travel document required. */
+export const NORDIC_COUNTRY_CODES = ['FI', 'SE', 'NO', 'DK', 'IS'] as const
+export function isNordicCountry(code: string): boolean {
+  return NORDIC_COUNTRY_CODES.includes(code as (typeof NORDIC_COUNTRY_CODES)[number])
+}
+export function isFinnishNationality(code: string): boolean {
+  return code === 'FI'
+}
+
 const baseSchema = z.object({
   schemaVersion: z.literal('v1'),
   fullName: z.string().min(1, 'Full name is required'),
   nationality: z.string().optional(),
-  documentType: documentTypeEnum,
-  documentNumber: z.string().min(1, 'Document number is required'),
+  documentType: documentTypeEnum.optional(),
+  documentNumber: z.string().optional(),
   dateOfBirth: z.string().optional(),
   checkInDate: z.string().min(1, 'Check-in date is required'),
   checkOutDate: z.string().min(1, 'Check-out date is required'),
@@ -28,6 +37,7 @@ const baseSchema = z.object({
   phoneNumber: z.string().optional(),
   phone: z.string().optional(),
   email: z.union([z.string().email(), z.literal('')]).optional(),
+  address: z.string().min(1, 'Residential address is required'),
 })
 
 export const RegistrationPayloadV1Schema = baseSchema
@@ -39,11 +49,33 @@ export const RegistrationPayloadV1Schema = baseSchema
     { message: 'Check-out date must be on or after check-in date', path: ['checkOutDate'] }
   )
   .superRefine((data, ctx) => {
+    const nat = (data.nationality ?? '').trim().toUpperCase()
+    const isNordic = isNordicCountry(nat)
+    const isFinnish = isFinnishNationality(nat)
     const num = data.documentNumber?.trim() ?? ''
-    if (!num) return
+    const docType = data.documentType
+
+    if (isNordic && !isFinnish) return
+
+    if (isFinnish) {
+      if (!num) {
+        ctx.addIssue({ code: 'custom', message: 'Personal identity code is required', path: ['documentNumber'] })
+        return
+      }
+      if (!isValidFinnishId(num)) {
+        ctx.addIssue({ code: 'custom', message: 'Finnish ID must be 11 characters (DDMMYYXNNNC format)', path: ['documentNumber'] })
+      }
+      return
+    }
+
+    if (!docType || !num) {
+      if (!num) ctx.addIssue({ code: 'custom', message: 'Travel document number is required', path: ['documentNumber'] })
+      if (!docType) ctx.addIssue({ code: 'custom', message: 'Document type is required', path: ['documentType'] })
+      return
+    }
     let valid = false
     let msg = 'Invalid document number'
-    switch (data.documentType) {
+    switch (docType) {
       case 'passport':
         valid = PASSPORT_REGEX.test(num)
         msg = 'Passport number must be 6–12 alphanumeric characters'
@@ -84,6 +116,7 @@ export interface FormState {
   phoneCountryCode: string
   phoneNumber: string
   email: string
+  address: string
 }
 
 export const defaultFormState: FormState = {
@@ -97,26 +130,30 @@ export const defaultFormState: FormState = {
   phoneCountryCode: '+358',
   phoneNumber: '',
   email: '',
+  address: '',
 }
 
-/** Build object for schema validation (includes phoneCountryCode/phoneNumber) */
+/** Build object for schema validation (includes phoneCountryCode/phoneNumber and form document fields) */
 export function formToValidationInput(form: FormState) {
   const base = formToPayload(form)
   return {
     ...base,
     phoneCountryCode: form.phoneCountryCode,
     phoneNumber: form.phoneNumber,
+    documentType: form.documentType,
+    documentNumber: form.documentNumber,
   }
 }
 
 export function formToPayload(form: FormState): RegistrationPayloadV1 {
+  const isFinnish = isFinnishNationality(form.nationality.trim())
+  const isNordic = isNordicCountry(form.nationality.trim())
   const payload: RegistrationPayloadV1 = {
     schemaVersion: 'v1',
     fullName: form.fullName.trim(),
-    documentType: form.documentType,
-    documentNumber: form.documentNumber.trim(),
     checkInDate: form.checkInDate,
     checkOutDate: form.checkOutDate,
+    address: form.address.trim(),
   }
   if (form.nationality.trim()) payload.nationality = form.nationality.trim()
   if (form.dateOfBirth.trim()) payload.dateOfBirth = form.dateOfBirth.trim()
@@ -124,6 +161,14 @@ export function formToPayload(form: FormState): RegistrationPayloadV1 {
   const num = form.phoneNumber.trim().replace(/\D/g, '')
   if (code && num) payload.phone = `${code}${num}`
   if (form.email.trim()) payload.email = form.email.trim()
+  // Document: Finnish → id + number; other Nordic → omit; not Nordic → passport/other + number
+  if (isFinnish) {
+    payload.documentType = 'id'
+    payload.documentNumber = form.documentNumber.trim()
+  } else if (!isNordic && form.documentNumber.trim()) {
+    payload.documentType = form.documentType
+    payload.documentNumber = form.documentNumber.trim()
+  }
   return payload
 }
 
