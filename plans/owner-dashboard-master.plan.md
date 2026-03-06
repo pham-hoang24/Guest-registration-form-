@@ -13,7 +13,8 @@
 
 | Endpoint | Auth | Response | Error cases |
 | -------- | ---- | -------- | ----------- |
-| `GET /v1/owner/properties` | Bearer JWT | `{ properties: [{ id, name?, address? }] }` | 401, 403 |
+| `GET /v1/owner/properties` | Bearer JWT | `{ properties: [{ id, name?, address?, pendingCount? }] }` | 401, 403 |
+| `GET /v1/owner/properties/:id` | Bearer JWT | `{ id, name?, address?, status?, rent?, leaseEnd?, floorArea?, inspection? }` (for hero-left property summary) | 401, 403, 404 |
 | `GET /v1/owner/properties/:id/submissions` | Bearer JWT | `{ submissions: [{ id, createdAt, status, tenantName? }] }` | 401, 403 |
 | `GET /v1/owner/submissions/:id` | Bearer JWT | `{ id, createdAt, status, payload: { fullName, nationality, documentNumber, address, dateOfBirth, checkInDate, checkOutDate, phone?, email?, ... } }` | 401, 403, 404 |
 | `GET /v1/owner/submissions/:id/pdf` | Bearer JWT | PDF blob + `Content-Disposition: attachment; filename="Matkustajailmoitus_Surname_GivenNames.pdf"` | 401, 403, 404 |
@@ -33,7 +34,7 @@
 ## Build order
 
 1. **Auth middleware first** — nothing else works without it. Define token source and middleware; implement middleware in backend.
-2. **Backend endpoints + DB queries** — `GET /v1/owner/properties`, `GET /v1/owner/properties/:id/submissions`, `GET /v1/owner/submissions/:id`, `GET /v1/owner/submissions/:id/pdf` (server-side fill of modal form template).
+2. **Backend endpoints + DB queries** — `GET /v1/owner/properties` (with optional `pendingCount`), `GET /v1/owner/properties/:id` (property detail for hero-left), `GET /v1/owner/properties/:id/submissions`, `GET /v1/owner/submissions/:id`, `GET /v1/owner/submissions/:id/pdf` (server-side fill of modal form template).
 3. **MSW mocks** that mirror those exact API contracts (for frontend dev without backend).
 4. **Frontend `contracts.ts` and `endpoints.ts`** — types and fetch functions matching the table above.
 5. **Dashboard UI shell** — sidebar, topbar, layout only (no data).
@@ -55,6 +56,10 @@
 - Frontend: single flow — call PDF endpoint, get blob, create object URL, `<a download>`, revoke URL. No `fillModalFormPdf.ts`, no pdf-lib in frontend.
 
 ---
+
+## Name parsing (canonical rule)
+
+- **fullName → surname and given names:** Last space-delimited token = surname; everything before = given names. Single-token names: full string = given name, surname = empty. Do not attempt cultural or locale-specific name-order detection. Both backend (PDF filename, Text1/Text2 fill) and frontend (tenant avatar initials, panel labels) must use this same rule — see Backend and UI agent plans.
 
 ## Reference
 

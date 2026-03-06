@@ -8,6 +8,7 @@ Define and implement owner authentication so that Backend and Frontend agents ca
 
 - Master plan: [owner-dashboard-master.plan.md](owner-dashboard-master.plan.md)
 - Existing backend: backend/src/routes/owner.ts (currently uses getOwnerFromRequest and JWT verify with OWNER_JWT_SECRET)
+- **JWT algorithm and secret:** Before starting, confirm: the existing login endpoint uses **[HS256 / RS256 — confirm which]**; the secret or public key is at **[e.g. `OWNER_JWT_SECRET` for HS256, or `OWNER_JWT_PUBLIC_KEY` for RS256]**. If RS256/ES256 is used, `jwt.verify()` must be called with the public key and algorithm; if HS256, with the shared secret. Do not assume one or the other — document and implement accordingly.
 
 ## Deliverables
 

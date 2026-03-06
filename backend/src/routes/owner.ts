@@ -1,6 +1,6 @@
 import express from "express";
-import jwt from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
+import { getOwnerFromRequest } from "../middleware/ownerAuth.js";
 import { writeAudit } from "../services/audit.js";
 import { canReadSubmission } from "../services/authz.js";
 import { db } from "../services/db.js";
@@ -10,24 +10,21 @@ import { decryptAesGcm } from "../crypto/aesgcm.js";
 import { assertHashMatch, hashNonceCiphertextTagHex, sha256Hex } from "../crypto/hashes.js";
 import { parseEncryptedPdfRecord } from "../storage/encryptedPdfRecord.js";
 import { storage } from "../services/storage.js";
-import type { OwnerIdentity } from "../types.js";
 
-const ownerJwtSecret = process.env.OWNER_JWT_SECRET || "dev-owner-secret";
-
-const getOwnerFromRequest = (req: express.Request): OwnerIdentity | null => {
-  const header = req.header("authorization");
-  if (!header?.startsWith("Bearer ")) return null;
-  const token = header.slice(7);
-  const decoded = jwt.verify(token, ownerJwtSecret) as jwt.JwtPayload;
-  return {
-    userId: String(decoded.sub),
-    tenantId: String(decoded.tenantId),
-    propertyIds: Array.isArray(decoded.propertyIds) ? decoded.propertyIds.map(String) : []
-  };
-};
+function getOwnerProperties(req: express.Request, res: express.Response): void {
+  const owner = getOwnerFromRequest(req);
+  if (!owner) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  const properties = owner.propertyIds.map((id) => ({ id }));
+  res.status(200).json({ properties });
+}
 
 export const ownerRouter = () => {
   const router = express.Router();
+
+  router.get("/properties", getOwnerProperties);
 
   router.get("/submissions/:id/pdf", async (req, res) => {
     const correlationId = req.header("x-correlation-id") || randomUUID();
