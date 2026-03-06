@@ -51,16 +51,16 @@ export class KeyVaultKekAdapter implements KekAdapter {
     if (dek.length !== DEK_LENGTH) {
       throw new CryptoError("Invalid DEK length");
     }
-    const key = await this.keyClient.getKey(this.keyName, this.keyVersion);
+    const key = await this.keyClient.getKey(this.keyName, this.keyVersion ? { version: this.keyVersion } : undefined);
     if (!key.id || !key.properties?.version) {
       throw new CryptoError("Key Vault key metadata missing");
     }
     const cryptoClient = new CryptographyClient(key.id, this.credential);
     const response = await cryptoClient.wrapKey(WRAP_ALGORITHM, dek);
-    if (!response.result || !response.keyId) {
+    if (!response.result || !response.keyID) {
       throw new CryptoError("Failed to wrap DEK with Key Vault");
     }
-    const kekKeyId = response.keyId;
+    const kekKeyId = response.keyID;
     const kekKeyVersion = parseKeyVersionFromId(kekKeyId) ?? key.properties.version;
     return {
       wrappedDek: Buffer.from(response.result),

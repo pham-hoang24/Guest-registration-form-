@@ -1,6 +1,6 @@
 import express from "express";
 import { randomUUID } from "node:crypto";
-import { getOwnerFromRequest } from "../middleware/ownerAuth.js";
+import { requireOwnerAuth } from "../middleware/ownerAuth.js";
 import { writeAudit } from "../services/audit.js";
 import { canReadSubmission } from "../services/authz.js";
 import { db } from "../services/db.js";
@@ -12,11 +12,7 @@ import { parseEncryptedPdfRecord } from "../storage/encryptedPdfRecord.js";
 import { storage } from "../services/storage.js";
 
 function getOwnerProperties(req: express.Request, res: express.Response): void {
-  const owner = getOwnerFromRequest(req);
-  if (!owner) {
-    res.status(401).json({ error: "unauthorized" });
-    return;
-  }
+  const owner = req.owner!;
   const properties = owner.propertyIds.map((id) => ({ id }));
   res.status(200).json({ properties });
 }
@@ -24,21 +20,13 @@ function getOwnerProperties(req: express.Request, res: express.Response): void {
 export const ownerRouter = () => {
   const router = express.Router();
 
+  router.use(requireOwnerAuth);
+
   router.get("/properties", getOwnerProperties);
 
   router.get("/submissions/:id/pdf", async (req, res) => {
     const correlationId = req.header("x-correlation-id") || randomUUID();
-    const owner = getOwnerFromRequest(req);
-    if (!owner) {
-      writeAudit("download_denied", {
-        correlationId,
-        actorType: "owner",
-        actorId: "unknown",
-        ip: req.ip,
-        userAgent: req.get("user-agent") ?? undefined
-      });
-      return res.status(401).json({ error: "unauthorized" });
-    }
+    const owner = req.owner!;
 
     const { allowed, reason, submission } = canReadSubmission(owner.userId, owner.tenantId, req.params.id);
     if (!allowed || !submission) {

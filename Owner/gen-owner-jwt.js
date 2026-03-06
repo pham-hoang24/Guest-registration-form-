@@ -13,7 +13,7 @@
  *   --tenantId     Tenant ID          (default: "dev-tenant")
  *   --propertyIds  Comma-separated    (default: "prop-1,prop-2")
  *   --expiresIn    JWT expiry         (default: "7d")
- *   --secret       Signing secret     (default: OWNER_JWT_SECRET env var or "dev-secret")
+ *   --secret       Signing secret     (default: OWNER_JWT_SECRET env var or "dev-owner-secret")
  *
  * Output:
  *   Prints the JWT to stdout so you can copy it into:
@@ -51,7 +51,7 @@ const tenantId = arg("tenantId", "dev-tenant");
 const propertyIdsRaw = arg("propertyIds", "prop-1,prop-2");
 const expiresIn = arg("expiresIn", "7d");
 const secret =
-  arg("secret", null) || process.env.OWNER_JWT_SECRET || "dev-secret";
+  arg("secret", null) || process.env.OWNER_JWT_SECRET || "dev-owner-secret";
 
 const propertyIds = propertyIdsRaw
   .split(",")
