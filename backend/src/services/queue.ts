@@ -1,39 +1,34 @@
-import { processSubmissionJob } from "../worker/processSubmission.js";
+import { InMemoryQueue } from "./inMemoryQueue.js";
+import { AzureServiceBusSender } from "./azureServiceBusSender.js";
 
 /**
- * Job type: only submissionId. Payload is loaded by the worker from the payload store.
- * Real queue implementations (Redis, SQS, etc.) should push only this small message;
- * request must not block on PDF generation.
+ * Producer interface: submit a job to the queue.
+ * Implementations: InMemoryQueue (local/tests), AzureServiceBusSender (production).
  */
-export type SubmissionJob = { submissionId: string };
-
-const jobQueue: SubmissionJob[] = [];
-let drainScheduled = false;
-
-function drain(): void {
-  if (jobQueue.length === 0) {
-    drainScheduled = false;
-    return;
-  }
-  const job = jobQueue.shift()!;
-  processSubmissionJob(job).catch((err) => {
-    console.error("[queue] processSubmissionJob failed:", err?.message ?? err);
-  });
-  if (jobQueue.length > 0) {
-    setImmediate(drain);
-  } else {
-    drainScheduled = false;
-  }
+export interface Queue {
+  enqueue(job: { submissionId: string }): Promise<void>;
 }
 
 /**
- * Enqueue a submission job. Resolves once the job is accepted (queued), not when PDF is ready.
- * MVP: in-process queue + background drain. Swap for Redis/SQS later with same signature.
+ * Consumer interface: start/stop processing jobs from the queue.
+ * Implementations: InMemoryWorker (local/tests), AzureServiceBusReceiver (production).
  */
-export async function enqueue(job: SubmissionJob): Promise<void> {
-  jobQueue.push(job);
-  if (!drainScheduled) {
-    drainScheduled = true;
-    setImmediate(drain);
-  }
+export interface QueueWorker {
+  start(): Promise<void>;
+  stop(): Promise<void>;
 }
+
+/**
+ * Active queue instance. Selects Azure Service Bus when SERVICE_BUS_NAMESPACE
+ * is set; falls back to in-memory for local dev and tests.
+ */
+export const queue: Queue = process.env.SERVICE_BUS_NAMESPACE
+  ? new AzureServiceBusSender()
+  : new InMemoryQueue();
+
+/**
+ * Enqueue a submission job. Resolves once the job is accepted, not when the
+ * PDF is ready (processing is asynchronous).
+ */
+export const enqueue = (job: { submissionId: string }): Promise<void> =>
+  queue.enqueue(job);

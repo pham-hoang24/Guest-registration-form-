@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { db, InMemoryDb } from "../src/services/db.js";
-import { storage } from "../src/services/storage.js";
+import { storage, InMemoryBlobStore } from "../src/services/storage.js";
 import { encryptPayload } from "../src/services/payloadEncryption.js";
 import { processSubmissionJob, setKekAdapterForTests } from "../src/worker/processSubmission.js";
 import { MockKekAdapter } from "../src/crypto/keyVaultKek.js";
 
 describe("worker idempotency", () => {
   beforeEach(() => {
-    (db as InMemoryDb).reset();
+    if (!(db instanceof InMemoryDb)) throw new Error("worker tests require InMemoryDb — unset SQL_SERVER");
+    if (!(storage instanceof InMemoryBlobStore)) throw new Error("worker tests require InMemoryBlobStore — unset BLOB_ACCOUNT_URL");
+    db.reset();
     storage.reset();
     setKekAdapterForTests(new MockKekAdapter("https://kv/keys/kek", "v1"));
   });
@@ -45,7 +47,9 @@ describe("worker DB-backed payload", () => {
   const mockKek = new MockKekAdapter("https://kv/keys/kek", "v1");
 
   beforeEach(() => {
-    (db as InMemoryDb).reset();
+    if (!(db instanceof InMemoryDb)) throw new Error("worker tests require InMemoryDb — unset SQL_SERVER");
+    if (!(storage instanceof InMemoryBlobStore)) throw new Error("worker tests require InMemoryBlobStore — unset BLOB_ACCOUNT_URL");
+    db.reset();
     storage.reset();
     setKekAdapterForTests(mockKek);
   });

@@ -66,12 +66,13 @@ export const ownerRouter = () => {
     try {
       const maxPdfBytes = Number(process.env.MAX_PDF_BYTES || 10 * 1024 * 1024);
       const parsedRecord = parseEncryptedPdfRecord(record);
-      const recordBlob = await storage.get(parsedRecord.blobPath);
-      if (!recordBlob) {
-        return res.status(404).json({ error: "missing_blob" });
-      }
+      // Check size BEFORE downloading so we never buffer an oversized blob.
       if (parsedRecord.contentLength > maxPdfBytes) {
         return res.status(413).json({ error: "pdf_too_large" });
+      }
+      const recordBlob = await storage.get(parsedRecord.blobPath, maxPdfBytes);
+      if (!recordBlob) {
+        return res.status(404).json({ error: "missing_blob" });
       }
       const dek = await unwrapDekWithKeyVault(
         parsedRecord.wrappedDekB64,
