@@ -6,15 +6,15 @@ export type SubmissionRecord = {
   propertyId: string;
   reservationId?: string | null;
   status: SubmissionStatus;
+  /** Unencrypted display name stored for list endpoints. GDPR-sensitive: plaintext PII. */
+  tenantName?: string | null;
   blobPath?: string | null;
-  wrappedDek?: string | null;
-  kekKeyId?: string | null;
-  kekKeyVersion?: string | null;
-  contentHash?: string | null;
   aadVersion: number;
   schemaVersion: number;
   attemptCount: number;
   lastError?: string | null;
+  /** ROWVERSION token from SQL Server; represented as hex string by the db adapter. */
+  rowVersion?: string | null;
   createdAt: string;
   updatedAt: string;
 };
