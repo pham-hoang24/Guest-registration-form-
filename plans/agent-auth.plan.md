@@ -1,41 +1,62 @@
 # Auth Checker Agent — Owner Authentication
 
+> **STATUS:** Core auth middleware is **DONE** (HS256). The remaining work is upgrading to OIDC/JWKS for production.
+> See [`agent-auth-oidc.plan.md`](agent-auth-oidc.plan.md) for the OIDC upgrade task.
+
+## Current state (as of last implementation)
+
+- `backend/src/middleware/ownerAuth.ts` — **IMPLEMENTED**
+  - `requireOwnerAuth` middleware: extracts `Authorization: Bearer <token>`, verifies with `OWNER_JWT_SECRET` (HS256), attaches `req.owner = { userId, tenantId, propertyIds }`, returns 401 on failure.
+  - Applied to all owner routes via `router.use(requireOwnerAuth)` in `backend/src/routes/owner.ts`.
+- `Owner/gen-owner-jwt.js` — **EXISTS**: signs a dev JWT with `OWNER_JWT_SECRET`.
+- **HS256 with a shared secret is MVP only.** Not safe for production (anyone with the secret can forge any identity).
+
 ## Goal
 
-Define and implement owner authentication so that Backend and Frontend agents can rely on a single contract. **Nothing else works without this.** No owner endpoint code should be written until token source and middleware are defined and implemented.
+Document the auth contract for Backend and Frontend agents; identify what still needs production hardening.
 
 ## Inputs
 
 - Master plan: [owner-dashboard-master.plan.md](owner-dashboard-master.plan.md)
-- Existing backend: backend/src/routes/owner.ts (currently uses getOwnerFromRequest and JWT verify with OWNER_JWT_SECRET)
-- **JWT algorithm and secret:** Before starting, confirm: the existing login endpoint uses **[HS256 / RS256 — confirm which]**; the secret or public key is at **[e.g. `OWNER_JWT_SECRET` for HS256, or `OWNER_JWT_PUBLIC_KEY` for RS256]**. If RS256/ES256 is used, `jwt.verify()` must be called with the public key and algorithm; if HS256, with the shared secret. Do not assume one or the other — document and implement accordingly.
+- Existing middleware: `backend/src/middleware/ownerAuth.ts` (HS256, complete)
+- Production upgrade plan: [`agent-auth-oidc.plan.md`](agent-auth-oidc.plan.md)
 
-## Deliverables
+## Auth contract (for Backend and Frontend agents to rely on)
 
-1. **Document: Where does the token come from?**
-   - Dev: e.g. VITE_DEV_OWNER_TOKEN / OWNER_JWT_SECRET-signed JWT in env; frontend sends it as Authorization: Bearer token.
-   - Prod: e.g. OIDC login callback; where is the JWT stored (in-memory vs sessionStorage) and how does the frontend attach it to requests?
-   - One short section per environment so Backend and Frontend know how to obtain and send the token.
+**Token source:**
+- Dev: `Owner/gen-owner-jwt.js` signs a JWT with `OWNER_JWT_SECRET`. Frontend sends as `Authorization: Bearer <token>`. Store in memory or `sessionStorage` (never `localStorage` for sensitive apps).
+- Prod: OIDC provider (Azure AD B2C or Auth0) issues JWT after login. See `agent-auth-oidc.plan.md` for upgrade path.
 
-2. **Document: What does the middleware look like?**
-   - Request: Authorization: Bearer token (or fallback header if any).
-   - Steps: extract token, verify (e.g. JWT with OWNER_JWT_SECRET), decode claims (e.g. sub, tenantId, propertyIds), attach to request (e.g. req.owner = { userId, tenantId, propertyIds }) or call next() with owner context.
-   - On failure: 401 Unauthorized (missing or invalid token). No 403 at this stage (403 is for valid token but no access to this resource, done in route handlers).
+**Middleware contract:**
+- Request header: `Authorization: Bearer <token>`
+- On valid token: `req.owner = { userId: string, tenantId: string, propertyIds: string[] }` — available in all route handlers.
+- On missing or invalid token: `401 { error: "unauthorized" }` — no details leaked.
+- 403 (forbidden) is NOT the middleware's job — it is the route handler's job when `propertyId` is not in `req.owner.propertyIds`.
 
-3. **Implement (or refactor) middleware in backend**
-   - Ensure all owner routes are protected by this middleware.
-   - Ensure route handlers can access req.owner (or equivalent) to check propertyIds for GET /v1/owner/properties, GET /v1/owner/properties/:id/submissions, and to resolve submission to property to owner for GET /v1/owner/submissions/:id and GET /v1/owner/submissions/:id/pdf.
+**Claim shape (JWT payload):**
+```json
+{
+  "sub": "<userId>",
+  "tenantId": "<tenantUUID>",
+  "propertyIds": ["<propertyUUID>", ...],
+  "iat": ...,
+  "exp": ...
+}
+```
 
-4. **Optional: Dev token helper**
-   - If not already present: document or add a way to issue a dev JWT that includes propertyIds so the frontend can call owner APIs locally (e.g. script or env that encodes a token the backend will accept).
+## Remaining tasks
+
+1. **Verify dev flow works end-to-end**: Run `gen-owner-jwt.js`, call a protected route, confirm 200 vs 401 behavior.
+2. **Production OIDC upgrade**: See [`agent-auth-oidc.plan.md`](agent-auth-oidc.plan.md) — swap HS256 to JWKS RS256, add startup guard, update env vars.
 
 ## Out of scope for this agent
 
-- Implementing the actual owner API handlers (list properties, list submissions, get submission, get PDF). Only auth/middleware and the contract they rely on.
-- Frontend login UI or OIDC integration (can be documented as to be implemented if not existing).
+- Implementing the actual owner API handlers (list properties, list submissions, get submission, get PDF). That is `agent-backend.plan.md`.
+- Frontend login UI or OIDC integration. That is `agent-auth-oidc.plan.md`.
 
 ## Definition of done
 
-- Written doc (or inline comments) answering where does the token come from and what does the middleware look like.
-- Middleware implemented and applied to owner routes; 401 returned when token is missing or invalid.
-- Backend and Frontend agents can read the doc and implement their parts against this contract.
+- Auth contract above is correct and confirmed against actual middleware code.
+- `requireOwnerAuth` applied to all `/v1/owner/*` routes.
+- Dev token helper (`gen-owner-jwt.js`) produces tokens the backend accepts.
+- OIDC upgrade tracked in `agent-auth-oidc.plan.md`.

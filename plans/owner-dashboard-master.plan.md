@@ -1,5 +1,7 @@
 # Owner Dashboard — Master Plan
 
+> **See also:** [`production-readiness-master.plan.md`](production-readiness-master.plan.md) for the infrastructure agents (SQL schema, real DB adapter, blob storage, queue, OIDC auth, deploy). The owner dashboard feature agents below depend on those infrastructure agents being complete.
+
 ## Principles
 
 - **Backend** stores tenant data in a database; exposes authenticated owner APIs; generates and serves the Matkustajailmoitus PDF server-side over HTTPS.
@@ -33,8 +35,12 @@
 
 ## Build order
 
-1. **Auth middleware first** — nothing else works without it. Define token source and middleware; implement middleware in backend.
-2. **Backend endpoints + DB queries** — `GET /v1/owner/properties` (with optional `pendingCount`), `GET /v1/owner/properties/:id` (property detail for hero-left), `GET /v1/owner/properties/:id/submissions`, `GET /v1/owner/submissions/:id`, `GET /v1/owner/submissions/:id/pdf` (server-side fill of modal form template).
+**Infrastructure (must be done first — see `production-readiness-master.plan.md`):**
+0. SQL schema → DB adapter → Storage adapter → Queue adapter (parallel where noted)
+
+**Dashboard feature (after infrastructure):**
+1. **Auth middleware** — HS256 MVP is done (`agent-auth.plan.md`). OIDC upgrade: `agent-auth-oidc.plan.md`.
+2. **Backend endpoints + DB queries** — `GET /v1/owner/properties` (with `pendingCount`), `GET /v1/owner/properties/:id` (property detail for hero-left), `GET /v1/owner/properties/:id/submissions`, `GET /v1/owner/submissions/:id`, `GET /v1/owner/submissions/:id/pdf` (already implemented — align to modal form template if needed).
 3. **MSW mocks** that mirror those exact API contracts (for frontend dev without backend).
 4. **Frontend `contracts.ts` and `endpoints.ts`** — types and fetch functions matching the table above.
 5. **Dashboard UI shell** — sidebar, topbar, layout only (no data).
