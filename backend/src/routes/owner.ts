@@ -28,7 +28,7 @@ export const ownerRouter = () => {
     const correlationId = req.header("x-correlation-id") || randomUUID();
     const owner = req.owner!;
 
-    const { allowed, reason, submission } = canReadSubmission(owner.userId, owner.tenantId, req.params.id);
+    const { allowed, reason, submission } = await canReadSubmission(owner.userId, owner.tenantId, req.params.id);
     if (!allowed || !submission) {
       writeAudit("download_denied", {
         correlationId,
@@ -43,7 +43,7 @@ export const ownerRouter = () => {
       return res.status(403).json({ error: "forbidden" });
     }
 
-    if (!submission.blobPath || !submission.wrappedDek) {
+    if (!submission.blobPath) {
       return res.status(404).json({ error: "not_ready" });
     }
 
@@ -58,7 +58,7 @@ export const ownerRouter = () => {
       userAgent: req.get("user-agent") ?? undefined
     });
 
-    const record = db.getEncryptedPdfRecord(submission.id);
+    const record = await db.getEncryptedPdfRecord(submission.id);
     if (!record) {
       return res.status(404).json({ error: "missing_blob" });
     }

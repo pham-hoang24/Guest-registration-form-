@@ -177,7 +177,9 @@ CREATE TABLE dbo.encrypted_pdf_records (
                               CONSTRAINT CK_epr_status CHECK (status IN ('PENDING_PDF', 'READY', 'FAILED')),
     attempt_count         INT              NOT NULL DEFAULT 0,
     last_error            NVARCHAR(1024)   NULL,
-    created_at            DATETIMEOFFSET   NOT NULL DEFAULT SYSDATETIMEOFFSET()
+    created_at            DATETIMEOFFSET   NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    -- optimistic concurrency token for compareAndSwap (rewrap job, retry logic)
+    row_version           ROWVERSION
 );
 GO
 

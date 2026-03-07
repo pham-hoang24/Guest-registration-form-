@@ -55,7 +55,7 @@ export const registrationRouter = () => {
         return res.status(401).json({ error: "invalid_token" });
       }
 
-      if (isGuestTokenReplay(claims.jti)) {
+      if (await isGuestTokenReplay(claims.jti)) {
         writeAudit("token_replay", {
           correlationId,
           actorType: "guest",
@@ -70,17 +70,13 @@ export const registrationRouter = () => {
 
       const submissionId = randomUUID();
       const payloadHash = createHash("sha256").update(JSON.stringify(req.body.payload)).digest("hex");
-      db.createSubmission({
+      await db.createSubmission({
         id: submissionId,
         tenantId: claims.tenantId,
         propertyId: claims.propertyId,
         reservationId: claims.reservationId ?? null,
         status: "PENDING_PDF",
         blobPath: null,
-        wrappedDek: null,
-        kekKeyId: null,
-        kekKeyVersion: null,
-        contentHash: payloadHash,
         aadVersion: 1,
         schemaVersion: 1,
         attemptCount: 0,
@@ -102,7 +98,7 @@ export const registrationRouter = () => {
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : "payload_encryption_failed";
-        db.updateSubmission(submissionId, { status: "FAILED", lastError: message });
+        await db.updateSubmission(submissionId, { status: "FAILED", lastError: message });
         writeAudit("submission_failed", {
           correlationId,
           actorType: "guest",
@@ -121,7 +117,7 @@ export const registrationRouter = () => {
         await db.insertPayload(claims.tenantId, claims.propertyId, submissionId, encryptedRecord);
       } catch (err) {
         const message = err instanceof Error ? err.message : "payload_storage_failed";
-        db.updateSubmission(submissionId, { status: "FAILED", lastError: message });
+        await db.updateSubmission(submissionId, { status: "FAILED", lastError: message });
         writeAudit("submission_failed", {
           correlationId,
           actorType: "guest",
@@ -137,8 +133,7 @@ export const registrationRouter = () => {
       }
 
       await enqueue({ submissionId });
-
-      markGuestTokenUsed(claims);
+      await markGuestTokenUsed(claims);
 
       writeAudit("submission_created", {
         correlationId,
@@ -150,6 +145,9 @@ export const registrationRouter = () => {
         ip: req.ip,
         userAgent: req.get("user-agent") ?? undefined
       });
+
+      // payloadHash intentionally not stored on SubmissionRecord (held in encrypted_payloads)
+      void payloadHash;
 
       res.status(202).json({ submissionId, status: "PENDING_PDF" });
     }

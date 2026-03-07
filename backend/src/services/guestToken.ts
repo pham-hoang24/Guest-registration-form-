@@ -2,12 +2,11 @@ import jwt from "jsonwebtoken";
 import { db } from "./db.js";
 import type { GuestTokenClaims } from "../types.js";
 
-const guestTokenSecret = process.env.GUEST_TOKEN_SECRET || "dev-guest-secret";
-const guestTokenAudience = process.env.GUEST_TOKEN_AUD || "guest-registration";
-
 export const verifyGuestToken = (token: string): GuestTokenClaims => {
-  const decoded = jwt.verify(token, guestTokenSecret, {
-    audience: guestTokenAudience
+  const secret = process.env.GUEST_TOKEN_SECRET || "dev-guest-secret";
+  const audience = process.env.GUEST_TOKEN_AUD || "guest-registration";
+  const decoded = jwt.verify(token, secret, {
+    audience
   }) as jwt.JwtPayload;
 
   const claims: GuestTokenClaims = {
@@ -28,12 +27,12 @@ export const verifyGuestToken = (token: string): GuestTokenClaims => {
   return claims;
 };
 
-export const isGuestTokenReplay = (jti: string) => {
-  return db.getGuestTokenJti(jti) !== null;
+export const isGuestTokenReplay = async (jti: string): Promise<boolean> => {
+  return (await db.getGuestTokenJti(jti)) !== null;
 };
 
-export const markGuestTokenUsed = (claims: GuestTokenClaims) => {
-  db.markGuestTokenUsed({
+export const markGuestTokenUsed = (claims: GuestTokenClaims): Promise<void> => {
+  return db.markGuestTokenUsed({
     jti: claims.jti,
     tenantId: claims.tenantId,
     propertyId: claims.propertyId,
