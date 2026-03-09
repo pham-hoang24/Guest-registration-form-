@@ -47,3 +47,33 @@ export const writeAudit = (eventType: AuditEventType, context: AuditContext): vo
       );
     });
 };
+
+/**
+ * Awaitable variant of writeAudit for privileged system jobs (e.g. rewrap job)
+ * where the audit trail must be durable before the process exits. Errors are
+ * logged to stderr but never thrown — audit failures must not abort the caller.
+ */
+export const awaitAudit = async (eventType: AuditEventType, context: AuditContext): Promise<void> => {
+  const correlationId = context.correlationId ?? randomUUID();
+  try {
+    await db.addAudit({
+      eventType,
+      correlationId,
+      actorType: context.actorType,
+      actorId: context.actorId,
+      tenantId: context.tenantId ?? null,
+      propertyId: context.propertyId ?? null,
+      submissionId: context.submissionId ?? null,
+      ip: context.ip ?? null,
+      userAgent: context.userAgent ?? null,
+      details: context.details ?? {}
+    });
+  } catch (err) {
+    console.error(
+      "[audit] Failed to persist audit event:",
+      eventType,
+      correlationId,
+      err instanceof Error ? err.message : err
+    );
+  }
+};
