@@ -1,6 +1,7 @@
+import type { KekAdapter } from "../crypto/keyVaultKek.js";
 import { KeyVaultKekAdapter } from "../crypto/keyVaultKek.js";
 
-let adapter: KeyVaultKekAdapter | null = null;
+let adapter: KekAdapter | null = null;
 
 const getAdapter = () => {
   if (!adapter) {
@@ -8,6 +9,11 @@ const getAdapter = () => {
   }
   return adapter;
 };
+
+/** Override the KEK adapter for tests. Call with null to restore default. */
+export function setKekAdapterForTests(a: KekAdapter | null): void {
+  adapter = a;
+}
 
 export const wrapDekWithKeyVault = async (dek: Buffer) => {
   const wrapped = await getAdapter().wrapDek(dek);

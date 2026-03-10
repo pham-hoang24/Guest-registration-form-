@@ -50,4 +50,14 @@ export interface DbAdapter {
 
   insertPayload(tenantId: string, propertyId: string, submissionId: string, record: EncryptedPayloadRecord): Promise<void>;
   getPayload(tenantId: string, propertyId: string, submissionId: string): Promise<EncryptedPayloadRecord | null>;
+
+  /**
+   * Paginated list of submissions for a property (newest first).
+   * Tenant-scoped: only returns rows where tenantId matches.
+   */
+  listSubmissions(
+    propertyId: string,
+    tenantId: string,
+    page: { offset: number; limit: number }
+  ): Promise<{ submissions: SubmissionRecord[]; total: number }>;
 }

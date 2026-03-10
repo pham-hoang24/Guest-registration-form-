@@ -16,3 +16,21 @@ export interface SubmissionSummary {
 export interface SubmissionsListResponse {
   submissions: SubmissionSummary[]
 }
+
+// ---------------------------------------------------------------------------
+// Owner — Properties
+// ---------------------------------------------------------------------------
+
+/**
+ * A property owned by the authenticated owner.
+ * `name` and `address` are optional display fields.
+ */
+export interface Property {
+  id: string
+  name?: string
+  address?: string
+}
+
+export interface OwnerPropertiesResponse {
+  properties: Property[]
+}

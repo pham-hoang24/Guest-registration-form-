@@ -23,7 +23,7 @@ export const setKekAdapterForTests = (adapter) => {
 };
 export const processSubmissionJob = async (job) => {
     const correlationId = randomUUID();
-    const submissionResult = db.getSubmissionWithVersion(job.submissionId);
+    const submissionResult = await db.getSubmissionWithVersion(job.submissionId);
     if (!submissionResult)
         return;
     const { submission, version } = submissionResult;
@@ -32,11 +32,11 @@ export const processSubmissionJob = async (job) => {
     if (submission.status === "FAILED" && submission.attemptCount >= maxAttempts) {
         return;
     }
-    const existingRecord = db.getEncryptedPdfRecord(submission.id);
+    const existingRecord = await db.getEncryptedPdfRecord(submission.id);
     if (existingRecord) {
         const isReady = await verifyExistingRecord(existingRecord);
         if (isReady) {
-            db.compareAndSwapSubmission(submission.id, version, { status: "READY" });
+            await db.compareAndSwapSubmission(submission.id, version, { status: "READY" });
             return;
         }
     }
@@ -48,7 +48,7 @@ export const processSubmissionJob = async (job) => {
         const encryptedRecord = await db.getPayload(submission.tenantId, submission.propertyId, submission.id);
         if (!encryptedRecord) {
             const message = "missing_payload";
-            db.updateSubmission(submission.id, { status: "FAILED", lastError: message });
+            await db.updateSubmission(submission.id, { status: "FAILED", lastError: message });
             writeAudit("submission_failed", {
                 correlationId,
                 actorType: "system",
@@ -70,17 +70,17 @@ export const processSubmissionJob = async (job) => {
         }
         catch (err) {
             const message = err instanceof Error ? err.message : "payload_decrypt_failed";
-            const latest = db.getSubmissionWithVersion(submission.id);
+            const latest = await db.getSubmissionWithVersion(submission.id);
             const updates = {
                 status: "FAILED",
                 lastError: message,
                 attemptCount: submission.attemptCount + 1
             };
             if (latest) {
-                db.compareAndSwapSubmission(submission.id, latest.version, updates);
+                await db.compareAndSwapSubmission(submission.id, latest.version, updates);
             }
             else {
-                db.updateSubmission(submission.id, updates);
+                await db.updateSubmission(submission.id, updates);
             }
             writeAudit("submission_failed", {
                 correlationId,
@@ -141,27 +141,16 @@ export const processSubmissionJob = async (job) => {
             attemptCount: submission.attemptCount,
             lastError: null
         };
-        db.setEncryptedPdfRecord(record);
-        const latest = db.getSubmissionWithVersion(submission.id);
+        await db.setEncryptedPdfRecord(record);
+        const latest = await db.getSubmissionWithVersion(submission.id);
         if (latest) {
-            db.compareAndSwapSubmission(submission.id, latest.version, {
+            await db.compareAndSwapSubmission(submission.id, latest.version, {
                 status: "READY",
-                blobPath,
-                wrappedDek: record.wrappedDekB64,
-                kekKeyId: record.kekKeyId,
-                kekKeyVersion: record.kekKeyVersion,
-                contentHash: record.ciphertextSha256Hex
+                blobPath
             });
         }
         else {
-            db.updateSubmission(submission.id, {
-                status: "READY",
-                blobPath,
-                wrappedDek: record.wrappedDekB64,
-                kekKeyId: record.kekKeyId,
-                kekKeyVersion: record.kekKeyVersion,
-                contentHash: record.ciphertextSha256Hex
-            });
+            await db.updateSubmission(submission.id, { status: "READY", blobPath });
         }
         writeAudit("pdf_ready", {
             correlationId,
@@ -174,21 +163,21 @@ export const processSubmissionJob = async (job) => {
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "unknown_error";
-        const latest = db.getSubmissionWithVersion(submission.id);
+        const latest = await db.getSubmissionWithVersion(submission.id);
         const updates = {
             status: "FAILED",
             lastError: message,
             attemptCount: submission.attemptCount + 1
         };
         if (latest) {
-            db.compareAndSwapSubmission(submission.id, latest.version, updates);
+            await db.compareAndSwapSubmission(submission.id, latest.version, updates);
         }
         else {
-            db.updateSubmission(submission.id, updates);
+            await db.updateSubmission(submission.id, updates);
         }
-        const recordWithVersion = db.getEncryptedPdfRecordWithVersion(submission.id);
+        const recordWithVersion = await db.getEncryptedPdfRecordWithVersion(submission.id);
         if (recordWithVersion) {
-            db.compareAndSwapEncryptedPdfRecord(submission.id, recordWithVersion.version, {
+            await db.compareAndSwapEncryptedPdfRecord(submission.id, recordWithVersion.version, {
                 status: "FAILED",
                 attemptCount: submission.attemptCount + 1,
                 lastError: message

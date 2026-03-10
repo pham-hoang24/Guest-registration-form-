@@ -818,6 +818,37 @@ export class SqlDb implements DbAdapter {
   }
 
   // -------------------------------------------------------------------------
+  // Submissions list (tenant-scoped, paginated)
+  // -------------------------------------------------------------------------
+
+  async listSubmissions(
+    propertyId: string,
+    tenantId: string,
+    page: { offset: number; limit: number }
+  ): Promise<{ submissions: SubmissionRecord[]; total: number }> {
+    return withTenantContext(tenantId, async (req) => {
+      // Explicit tenant_id filter provides defence-in-depth alongside RLS.
+      // If RLS is ever bypassed (admin connection, rewrap job, misconfigured pool),
+      // this ensures listSubmissions never leaks cross-tenant rows.
+      req.input("propertyId", sql.UniqueIdentifier, propertyId);
+      req.input("tenantId", sql.UniqueIdentifier, tenantId);
+      req.input("offset", sql.Int, page.offset);
+      req.input("limit", sql.Int, page.limit);
+      const result = await req.query<SubmissionRow & { total_count: number }>(`
+        SELECT *, COUNT(*) OVER () AS total_count
+        FROM dbo.submissions
+        WHERE property_id = @propertyId
+          AND tenant_id = @tenantId
+        ORDER BY created_at DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `);
+      const total = result.recordset[0]?.total_count ?? 0;
+      const submissions = result.recordset.map(mapSubmission);
+      return { submissions, total };
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Private helpers (bypass RLS to read tenantId for context setup)
   // -------------------------------------------------------------------------
 

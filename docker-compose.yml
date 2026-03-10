@@ -1,0 +1,40 @@
+version: "3.9"
+
+# Local development compose — NOT for production.
+# Production uses Azure Container Apps with Managed Identity.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: runner
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # Dev-only: leave KEYVAULT_URL / SQL_SERVER unset → use in-memory adapters.
+      OWNER_JWT_SECRET: ${OWNER_JWT_SECRET:-dev-owner-secret}
+      # Set these to enable real Azure integrations:
+      # KEYVAULT_URL: https://<vault>.vault.azure.net
+      # KEK_KEY_NAME: guest-reg-kek
+      # SQL_SERVER: <server>.database.windows.net
+      # SQL_DATABASE: guestreg
+      # BLOB_ACCOUNT_URL: https://<account>.blob.core.windows.net
+      # SERVICE_BUS_NAMESPACE: <ns>.servicebus.windows.net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      target: runner
+      args:
+        VITE_API_BASE_URL: http://localhost:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy

@@ -6,6 +6,10 @@ const getAdapter = () => {
     }
     return adapter;
 };
+/** Override the KEK adapter for tests. Call with null to restore default. */
+export function setKekAdapterForTests(a) {
+    adapter = a;
+}
 export const wrapDekWithKeyVault = async (dek) => {
     const wrapped = await getAdapter().wrapDek(dek);
     return {

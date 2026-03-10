@@ -19,10 +19,45 @@ export const ownerRouter = () => {
     const router = express.Router();
     router.use(requireOwnerAuth);
     router.get("/properties", getOwnerProperties);
+    // GET /v1/owner/properties/:propertyId/submissions — paginated list
+    router.get("/properties/:propertyId/submissions", async (req, res) => {
+        const owner = req.owner;
+        const { propertyId } = req.params;
+        const identity = await db.getOwnerIdentity(owner.userId, owner.tenantId);
+        if (!identity.propertyIds.includes(propertyId)) {
+            return res.status(403).json({ error: "forbidden" });
+        }
+        const rawLimit = parseInt(String(req.query.limit ?? "50"), 10);
+        const rawOffset = parseInt(String(req.query.offset ?? "0"), 10);
+        const limit = Math.min(isNaN(rawLimit) ? 50 : Math.max(rawLimit, 1), 100);
+        const offset = isNaN(rawOffset) ? 0 : Math.max(rawOffset, 0);
+        const { submissions, total } = await db.listSubmissions(propertyId, owner.tenantId, { offset, limit });
+        return res.status(200).json({ submissions, total, offset, limit });
+    });
+    // GET /v1/owner/submissions/:id — submission metadata (no PDF)
+    router.get("/submissions/:id", async (req, res) => {
+        const owner = req.owner;
+        const { allowed, submission } = await canReadSubmission(owner.userId, owner.tenantId, req.params.id);
+        if (!allowed || !submission) {
+            return res.status(403).json({ error: "forbidden" });
+        }
+        return res.status(200).json({
+            id: submission.id,
+            tenantId: submission.tenantId,
+            propertyId: submission.propertyId,
+            status: submission.status,
+            createdAt: submission.createdAt,
+            updatedAt: submission.updatedAt,
+            attemptCount: submission.attemptCount,
+            // Return a sanitised indicator rather than the raw internal error message.
+            // Raw messages may contain Key Vault URLs, SQL connection strings, or stack traces.
+            hasError: submission.lastError != null
+        });
+    });
     router.get("/submissions/:id/pdf", async (req, res) => {
         const correlationId = req.header("x-correlation-id") || randomUUID();
         const owner = req.owner;
-        const { allowed, reason, submission } = canReadSubmission(owner.userId, owner.tenantId, req.params.id);
+        const { allowed, reason, submission } = await canReadSubmission(owner.userId, owner.tenantId, req.params.id);
         if (!allowed || !submission) {
             writeAudit("download_denied", {
                 correlationId,
@@ -36,7 +71,7 @@ export const ownerRouter = () => {
             });
             return res.status(403).json({ error: "forbidden" });
         }
-        if (!submission.blobPath || !submission.wrappedDek) {
+        if (!submission.blobPath) {
             return res.status(404).json({ error: "not_ready" });
         }
         writeAudit("download_started", {
@@ -49,19 +84,20 @@ export const ownerRouter = () => {
             ip: req.ip,
             userAgent: req.get("user-agent") ?? undefined
         });
-        const record = db.getEncryptedPdfRecord(submission.id);
+        const record = await db.getEncryptedPdfRecord(submission.id);
         if (!record) {
             return res.status(404).json({ error: "missing_blob" });
         }
         try {
             const maxPdfBytes = Number(process.env.MAX_PDF_BYTES || 10 * 1024 * 1024);
             const parsedRecord = parseEncryptedPdfRecord(record);
-            const recordBlob = await storage.get(parsedRecord.blobPath);
-            if (!recordBlob) {
-                return res.status(404).json({ error: "missing_blob" });
-            }
+            // Check size BEFORE downloading so we never buffer an oversized blob.
             if (parsedRecord.contentLength > maxPdfBytes) {
                 return res.status(413).json({ error: "pdf_too_large" });
+            }
+            const recordBlob = await storage.get(parsedRecord.blobPath, maxPdfBytes);
+            if (!recordBlob) {
+                return res.status(404).json({ error: "missing_blob" });
             }
             const dek = await unwrapDekWithKeyVault(parsedRecord.wrappedDekB64, parsedRecord.kekKeyId, parsedRecord.kekKeyVersion);
             const aad = buildAadBytes({

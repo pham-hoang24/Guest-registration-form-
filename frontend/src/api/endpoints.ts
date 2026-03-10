@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchBlob } from './client'
-import type { SubmissionsListResponse } from './contracts'
+import type { OwnerPropertiesResponse, SubmissionsListResponse } from './contracts'
 
 export interface GuestTokenResponse {
   token: string
@@ -30,4 +30,10 @@ export async function downloadPdf(
   token: string
 ): Promise<Blob> {
   return apiFetchBlob(`/v1/owner/submissions/${submissionId}/pdf`, { token })
+}
+
+export async function fetchOwnerProperties(
+  token: string
+): Promise<OwnerPropertiesResponse> {
+  return apiFetch<OwnerPropertiesResponse>('/v1/owner/properties', { token })
 }

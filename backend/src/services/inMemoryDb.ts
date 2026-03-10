@@ -150,6 +150,19 @@ export class InMemoryDb implements DbAdapter {
     return this.payloadStore.getPayload(tenantId, propertyId, submissionId);
   }
 
+  async listSubmissions(
+    propertyId: string,
+    tenantId: string,
+    page: { offset: number; limit: number }
+  ): Promise<{ submissions: SubmissionRecord[]; total: number }> {
+    const all = [...this.submissions.values()]
+      .filter((s) => s.propertyId === propertyId && s.tenantId === tenantId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const total = all.length;
+    const submissions = all.slice(page.offset, page.offset + page.limit);
+    return { submissions, total };
+  }
+
   reset(): void {
     this.submissions.clear();
     this.encryptedPdfRecords.clear();

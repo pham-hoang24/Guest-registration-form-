@@ -1,10 +1,10 @@
 import jwt from "jsonwebtoken";
 import { db } from "./db.js";
-const guestTokenSecret = process.env.GUEST_TOKEN_SECRET || "dev-guest-secret";
-const guestTokenAudience = process.env.GUEST_TOKEN_AUD || "guest-registration";
 export const verifyGuestToken = (token) => {
-    const decoded = jwt.verify(token, guestTokenSecret, {
-        audience: guestTokenAudience
+    const secret = process.env.GUEST_TOKEN_SECRET || "dev-guest-secret";
+    const audience = process.env.GUEST_TOKEN_AUD || "guest-registration";
+    const decoded = jwt.verify(token, secret, {
+        audience
     });
     const claims = {
         tenantId: String(decoded.tenantId),
@@ -21,11 +21,11 @@ export const verifyGuestToken = (token) => {
     }
     return claims;
 };
-export const isGuestTokenReplay = (jti) => {
-    return db.getGuestTokenJti(jti) !== null;
+export const isGuestTokenReplay = async (jti) => {
+    return (await db.getGuestTokenJti(jti)) !== null;
 };
 export const markGuestTokenUsed = (claims) => {
-    db.markGuestTokenUsed({
+    return db.markGuestTokenUsed({
         jti: claims.jti,
         tenantId: claims.tenantId,
         propertyId: claims.propertyId,

@@ -1,30 +1,14 @@
-import { processSubmissionJob } from "../worker/processSubmission.js";
-const jobQueue = [];
-let drainScheduled = false;
-function drain() {
-    if (jobQueue.length === 0) {
-        drainScheduled = false;
-        return;
-    }
-    const job = jobQueue.shift();
-    processSubmissionJob(job).catch((err) => {
-        console.error("[queue] processSubmissionJob failed:", err?.message ?? err);
-    });
-    if (jobQueue.length > 0) {
-        setImmediate(drain);
-    }
-    else {
-        drainScheduled = false;
-    }
-}
+import { InMemoryQueue } from "./inMemoryQueue.js";
+import { AzureServiceBusSender } from "./azureServiceBusSender.js";
 /**
- * Enqueue a submission job. Resolves once the job is accepted (queued), not when PDF is ready.
- * MVP: in-process queue + background drain. Swap for Redis/SQS later with same signature.
+ * Active queue instance. Selects Azure Service Bus when SERVICE_BUS_NAMESPACE
+ * is set; falls back to in-memory for local dev and tests.
  */
-export async function enqueue(job) {
-    jobQueue.push(job);
-    if (!drainScheduled) {
-        drainScheduled = true;
-        setImmediate(drain);
-    }
-}
+export const queue = process.env.SERVICE_BUS_NAMESPACE
+    ? new AzureServiceBusSender()
+    : new InMemoryQueue();
+/**
+ * Enqueue a submission job. Resolves once the job is accepted, not when the
+ * PDF is ready (processing is asynchronous).
+ */
+export const enqueue = (job) => queue.enqueue(job);

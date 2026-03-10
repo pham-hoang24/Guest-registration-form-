@@ -24,6 +24,46 @@ export const ownerRouter = () => {
 
   router.get("/properties", getOwnerProperties);
 
+  // GET /v1/owner/properties/:propertyId/submissions — paginated list
+  router.get("/properties/:propertyId/submissions", async (req, res) => {
+    const owner = req.owner!;
+    const { propertyId } = req.params;
+
+    const identity = await db.getOwnerIdentity(owner.userId, owner.tenantId);
+    if (!identity.propertyIds.includes(propertyId)) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+
+    const rawLimit = parseInt(String(req.query.limit ?? "50"), 10);
+    const rawOffset = parseInt(String(req.query.offset ?? "0"), 10);
+    const limit = Math.min(isNaN(rawLimit) ? 50 : Math.max(rawLimit, 1), 100);
+    const offset = isNaN(rawOffset) ? 0 : Math.max(rawOffset, 0);
+
+    const { submissions, total } = await db.listSubmissions(propertyId, owner.tenantId, { offset, limit });
+    return res.status(200).json({ submissions, total, offset, limit });
+  });
+
+  // GET /v1/owner/submissions/:id — submission metadata (no PDF)
+  router.get("/submissions/:id", async (req, res) => {
+    const owner = req.owner!;
+    const { allowed, submission } = await canReadSubmission(owner.userId, owner.tenantId, req.params.id);
+    if (!allowed || !submission) {
+      return res.status(403).json({ error: "forbidden" });
+    }
+    return res.status(200).json({
+      id: submission.id,
+      tenantId: submission.tenantId,
+      propertyId: submission.propertyId,
+      status: submission.status,
+      createdAt: submission.createdAt,
+      updatedAt: submission.updatedAt,
+      attemptCount: submission.attemptCount,
+      // Return a sanitised indicator rather than the raw internal error message.
+      // Raw messages may contain Key Vault URLs, SQL connection strings, or stack traces.
+      hasError: submission.lastError != null
+    });
+  });
+
   router.get("/submissions/:id/pdf", async (req, res) => {
     const correlationId = req.header("x-correlation-id") || randomUUID();
     const owner = req.owner!;
