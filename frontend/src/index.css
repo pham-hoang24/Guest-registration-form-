@@ -1,6 +1,0 @@
-@import "tailwindcss";
-
-/* Use system fonts only; no remote font loads on guest page. */
-:root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-}
