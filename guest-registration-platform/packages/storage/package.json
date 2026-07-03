@@ -9,6 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@azure/storage-blob": "^12.26.0"
+  },
   "devDependencies": {
     "@types/node": "^22.13.0",
     "typescript": "^5.7.0",

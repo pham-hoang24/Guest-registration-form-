@@ -15,6 +15,7 @@
     "@gr/db": "workspace:*",
     "@gr/shared": "workspace:*",
     "@gr/storage": "workspace:*",
+    "@gr/queue": "workspace:*",
     "@gr/worker": "workspace:*",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",

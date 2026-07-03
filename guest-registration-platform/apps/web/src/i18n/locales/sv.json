@@ -1,0 +1,56 @@
+{
+  "page": {
+    "title": "Gästregistrering",
+    "requirementVersion": "Kravversion {{version}}"
+  },
+  "section": {
+    "stay": "Vistelse",
+    "primaryGuest": "Primär gäst",
+    "additionalGuest": "Ytterligare gäst {{n}}",
+    "confirmation": "Bekräftelse"
+  },
+  "field": {
+    "arrivalDate": "Ankomstdatum",
+    "departureDate": "Avresedatum",
+    "purposeOfStay": "Syfte med vistelsen",
+    "email": "E-post",
+    "phone": "Telefon",
+    "firstName": "Förnamn",
+    "lastName": "Efternamn",
+    "dateOfBirth": "Födelsedatum",
+    "nationality": "Nationalitet (2-bokstavskod)",
+    "address": "Hemadress",
+    "documentType": "Dokumenttyp",
+    "documentNumber": "Dokumentnummer"
+  },
+  "purpose": {
+    "Leisure": "Fritid",
+    "Business": "Affärsresa",
+    "Other": "Annat"
+  },
+  "docType": {
+    "passport": "Pass",
+    "id_card": "ID-kort",
+    "residence_permit": "Uppehållstillstånd",
+    "other": "Annat"
+  },
+  "confirmation": {
+    "privacy": "Jag accepterar integritetspolicyn och förstår att mina uppgifter behandlas för att uppfylla registreringsskyldigheten.",
+    "accuracy": "Jag bekräftar att den angivna informationen är korrekt."
+  },
+  "action": {
+    "submit": "Skicka registrering",
+    "submitting": "Skickar…",
+    "addGuest": "Lägg till gäst",
+    "removeGuest": "Ta bort"
+  },
+  "status": {
+    "loading": "Läser in…",
+    "linkNotValid": "Länken är ogiltig",
+    "linkExpiredDesc": "Den här registreringslänken är ogiltig eller har gått ut. Kontakta din värd för att få en ny länk.",
+    "success": "Registrering klar",
+    "successDesc": "Tack. Din registrering har mottagits. Referens: {{reference}}",
+    "errorLinkExpired": "Den här registreringslänken är inte längre giltig.",
+    "errorGeneric": "Inlämning misslyckades. Försök igen."
+  }
+}

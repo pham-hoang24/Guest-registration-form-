@@ -41,6 +41,27 @@ export async function apiPost<T>(path: string, body: unknown, token?: string): P
   return response.json() as Promise<T>;
 }
 
+export async function apiPatch<T>(path: string, body: unknown, token?: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) await parseError(response);
+  return response.json() as Promise<T>;
+}
+
+export async function apiAction(path: string, token?: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) await parseError(response);
+}
+
 /** Fetches the decrypted PDF and triggers a browser download. */
 export async function downloadPdf(submissionId: string, token: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/v1/owner/submissions/${submissionId}/pdf`, {

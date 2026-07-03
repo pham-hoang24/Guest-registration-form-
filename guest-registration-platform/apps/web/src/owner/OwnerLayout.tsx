@@ -9,9 +9,14 @@ export default function OwnerLayout({ title, children }: { title: string; childr
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="flex items-center justify-between bg-white px-6 py-3 shadow-sm">
-        <Link to="/owner/properties" className="font-bold text-slate-900">
-          Guest Registration
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/owner/properties" className="font-bold text-slate-900">
+            Guest Registration
+          </Link>
+          <Link to="/owner/users" className="text-sm text-slate-500 hover:text-slate-900">
+            Team
+          </Link>
+        </div>
         <div className="flex items-center gap-3 text-sm text-slate-600">
           {user && (
             <span>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   DOCUMENT_TYPES,
   PURPOSES_OF_STAY,
@@ -10,6 +11,7 @@ import {
   type RegistrationLinkInfo,
 } from "@gr/shared";
 import { ApiError, apiGet, apiPost } from "../api/client.js";
+import i18n from "../i18n/index.js";
 
 type PageState =
   | { kind: "loading" }
@@ -19,7 +21,10 @@ type PageState =
   | { kind: "success"; submissionId: string }
   | { kind: "error"; info: RegistrationLinkInfo; message: string };
 
-const emptyGuest = {
+const SUPPORTED_UI_LANGS = ["en", "fi", "sv"] as const;
+type SupportedLang = (typeof SUPPORTED_UI_LANGS)[number];
+
+const emptyGuest = (isPrimary: boolean) => ({
   firstName: "",
   lastName: "",
   dateOfBirth: "",
@@ -27,8 +32,8 @@ const emptyGuest = {
   address: "",
   documentType: "passport" as const,
   documentNumber: "",
-  isPrimaryGuest: true,
-};
+  isPrimaryGuest: isPrimary,
+});
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none";
@@ -37,6 +42,7 @@ const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 export default function GuestRegistrationPage() {
   const { token } = useParams<{ token: string }>();
   const [state, setState] = useState<PageState>({ kind: "loading" });
+  const { t } = useTranslation();
 
   const form = useForm<GuestSubmissionRequest>({
     resolver: zodResolver(guestSubmissionRequestSchema),
@@ -46,13 +52,15 @@ export default function GuestRegistrationPage() {
       purposeOfStay: "Leisure",
       guestEmail: "",
       guestPhone: "",
-      guests: [emptyGuest],
+      guests: [emptyGuest(true)],
       privacyAccepted: undefined as unknown as true,
       accuracyConfirmed: undefined as unknown as true,
     },
   });
-  const { register, handleSubmit, formState } = form;
+  const { register, handleSubmit, formState, control } = form;
   const errors = formState.errors;
+
+  const { fields, append, remove } = useFieldArray({ control, name: "guests" });
 
   useEffect(() => {
     if (!token) {
@@ -77,33 +85,34 @@ export default function GuestRegistrationPage() {
     } catch (error) {
       const message =
         error instanceof ApiError && error.code === "invalid_or_expired_link"
-          ? "This registration link is no longer valid."
-          : "Submission failed. Please try again.";
+          ? t("status.errorLinkExpired")
+          : t("status.errorGeneric");
       setState({ kind: "error", info, message });
     }
   });
 
+  const changeLang = (lang: SupportedLang) => {
+    void i18n.changeLanguage(lang);
+    localStorage.setItem("gr-lang", lang);
+  };
+
   if (state.kind === "loading") {
-    return <CenteredCard>Loading…</CenteredCard>;
+    return <CenteredCard>{t("status.loading")}</CenteredCard>;
   }
   if (state.kind === "invalid_link") {
     return (
       <CenteredCard>
-        <h1 className="text-xl font-semibold text-slate-900">Link not valid</h1>
-        <p className="mt-2 text-slate-600">
-          This registration link is invalid or has expired. Please contact your host for a new
-          link.
-        </p>
+        <h1 className="text-xl font-semibold text-slate-900">{t("status.linkNotValid")}</h1>
+        <p className="mt-2 text-slate-600">{t("status.linkExpiredDesc")}</p>
       </CenteredCard>
     );
   }
   if (state.kind === "success") {
     return (
       <CenteredCard>
-        <h1 className="text-xl font-semibold text-green-700">Registration complete</h1>
+        <h1 className="text-xl font-semibold text-green-700">{t("status.success")}</h1>
         <p className="mt-2 text-slate-600">
-          Thank you. Your registration has been received. Reference:{" "}
-          <span className="font-mono text-sm">{state.submissionId}</span>
+          {t("status.successDesc", { reference: state.submissionId })}
         </p>
       </CenteredCard>
     );
@@ -111,18 +120,37 @@ export default function GuestRegistrationPage() {
 
   const info = state.info;
   const submitting = state.kind === "submitting";
+  const currentLang = (i18n.language.slice(0, 2) ?? "en") as SupportedLang;
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-6">
       <div className="mx-auto max-w-lg">
-        <header className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">Guest registration</h1>
-          <p className="text-slate-600">
-            {info.propertyName}, {info.propertyCity}
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            Requirement version {info.requirementVersion}
-          </p>
+        <header className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">{t("page.title")}</h1>
+            <p className="text-slate-600">
+              {info.propertyName}, {info.propertyCity}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              {t("page.requirementVersion", { version: info.requirementVersion })}
+            </p>
+          </div>
+          <div className="flex gap-1 text-sm">
+            {SUPPORTED_UI_LANGS.map((lang) => (
+              <button
+                key={lang}
+                type="button"
+                onClick={() => changeLang(lang)}
+                className={`rounded px-2 py-1 font-medium uppercase ${
+                  currentLang === lang
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {lang}
+              </button>
+            ))}
+          </div>
         </header>
 
         {state.kind === "error" && (
@@ -130,83 +158,144 @@ export default function GuestRegistrationPage() {
         )}
 
         <form onSubmit={onSubmit} className="space-y-6" noValidate>
-          <Section title="Stay">
+          <Section title={t("section.stay")}>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Arrival date" error={errors.arrivalDate?.message}>
+              <Field label={t("field.arrivalDate")} error={errors.arrivalDate?.message}>
                 <input type="date" className={inputClass} {...register("arrivalDate")} />
               </Field>
-              <Field label="Departure date" error={errors.departureDate?.message}>
+              <Field label={t("field.departureDate")} error={errors.departureDate?.message}>
                 <input type="date" className={inputClass} {...register("departureDate")} />
               </Field>
             </div>
-            <Field label="Purpose of stay" error={errors.purposeOfStay?.message}>
+            <Field label={t("field.purposeOfStay")} error={errors.purposeOfStay?.message}>
               <select className={inputClass} {...register("purposeOfStay")}>
                 {PURPOSES_OF_STAY.map((purpose) => (
                   <option key={purpose} value={purpose}>
-                    {purpose}
+                    {t(`purpose.${purpose}`)}
                   </option>
                 ))}
               </select>
             </Field>
-            <Field label="Email" error={errors.guestEmail?.message}>
-              <input type="email" autoComplete="email" className={inputClass} {...register("guestEmail")} />
-            </Field>
-            <Field label="Phone" error={errors.guestPhone?.message}>
-              <input type="tel" autoComplete="tel" className={inputClass} {...register("guestPhone")} />
-            </Field>
-          </Section>
-
-          <Section title="Primary guest">
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="First name" error={errors.guests?.[0]?.firstName?.message}>
-                <input className={inputClass} {...register("guests.0.firstName")} />
-              </Field>
-              <Field label="Last name" error={errors.guests?.[0]?.lastName?.message}>
-                <input className={inputClass} {...register("guests.0.lastName")} />
-              </Field>
-            </div>
-            <Field label="Date of birth" error={errors.guests?.[0]?.dateOfBirth?.message}>
-              <input type="date" className={inputClass} {...register("guests.0.dateOfBirth")} />
-            </Field>
-            <Field
-              label="Nationality (2-letter code)"
-              error={errors.guests?.[0]?.nationality?.message}
-            >
+            <Field label={t("field.email")} error={errors.guestEmail?.message}>
               <input
+                type="email"
+                autoComplete="email"
                 className={inputClass}
-                placeholder="FI"
-                maxLength={2}
-                {...register("guests.0.nationality")}
+                {...register("guestEmail")}
               />
             </Field>
-            <Field label="Home address" error={errors.guests?.[0]?.address?.message}>
-              <input className={inputClass} {...register("guests.0.address")} />
+            <Field label={t("field.phone")} error={errors.guestPhone?.message}>
+              <input
+                type="tel"
+                autoComplete="tel"
+                className={inputClass}
+                {...register("guestPhone")}
+              />
             </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Document type" error={errors.guests?.[0]?.documentType?.message}>
-                <select className={inputClass} {...register("guests.0.documentType")}>
-                  {DOCUMENT_TYPES.map((docType) => (
-                    <option key={docType} value={docType}>
-                      {docType.replace("_", " ")}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Document number" error={errors.guests?.[0]?.documentNumber?.message}>
-                <input className={inputClass} {...register("guests.0.documentNumber")} />
-              </Field>
-            </div>
-            {/* isPrimaryGuest stays true via defaultValues; single-guest MVP */}
           </Section>
 
-          <Section title="Confirmation">
+          {fields.map((field, index) => (
+            <Section
+              key={field.id}
+              title={
+                index === 0
+                  ? t("section.primaryGuest")
+                  : t("section.additionalGuest", { n: index })
+              }
+              action={
+                index > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => remove(index)}
+                    className="text-sm text-red-600 hover:text-red-800"
+                  >
+                    {t("action.removeGuest")}
+                  </button>
+                ) : undefined
+              }
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label={t("field.firstName")}
+                  error={errors.guests?.[index]?.firstName?.message}
+                >
+                  <input className={inputClass} {...register(`guests.${index}.firstName`)} />
+                </Field>
+                <Field
+                  label={t("field.lastName")}
+                  error={errors.guests?.[index]?.lastName?.message}
+                >
+                  <input className={inputClass} {...register(`guests.${index}.lastName`)} />
+                </Field>
+              </div>
+              <Field
+                label={t("field.dateOfBirth")}
+                error={errors.guests?.[index]?.dateOfBirth?.message}
+              >
+                <input
+                  type="date"
+                  className={inputClass}
+                  {...register(`guests.${index}.dateOfBirth`)}
+                />
+              </Field>
+              <Field
+                label={t("field.nationality")}
+                error={errors.guests?.[index]?.nationality?.message}
+              >
+                <input
+                  className={inputClass}
+                  placeholder="FI"
+                  maxLength={2}
+                  {...register(`guests.${index}.nationality`)}
+                />
+              </Field>
+              <Field
+                label={t("field.address")}
+                error={errors.guests?.[index]?.address?.message}
+              >
+                <input className={inputClass} {...register(`guests.${index}.address`)} />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label={t("field.documentType")}
+                  error={errors.guests?.[index]?.documentType?.message}
+                >
+                  <select className={inputClass} {...register(`guests.${index}.documentType`)}>
+                    {DOCUMENT_TYPES.map((docType) => (
+                      <option key={docType} value={docType}>
+                        {t(`docType.${docType}`)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label={t("field.documentNumber")}
+                  error={errors.guests?.[index]?.documentNumber?.message}
+                >
+                  <input className={inputClass} {...register(`guests.${index}.documentNumber`)} />
+                </Field>
+              </div>
+            </Section>
+          ))}
+
+          {fields.length < 20 && (
+            <button
+              type="button"
+              onClick={() => append(emptyGuest(false))}
+              className="w-full rounded-lg border-2 border-dashed border-slate-300 py-3 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600"
+            >
+              + {t("action.addGuest")}
+            </button>
+          )}
+
+          <Section title={t("section.confirmation")}>
             <Checkbox
-              label="I accept the privacy notice and understand my data is processed to meet accommodation registration obligations."
+              label={t("confirmation.privacy")}
               error={errors.privacyAccepted?.message}
               {...register("privacyAccepted")}
             />
             <Checkbox
-              label="I confirm the information provided is accurate."
+              label={t("confirmation.accuracy")}
               error={errors.accuracyConfirmed?.message}
               {...register("accuracyConfirmed")}
             />
@@ -217,7 +306,7 @@ export default function GuestRegistrationPage() {
             disabled={submitting}
             className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {submitting ? "Submitting…" : "Submit registration"}
+            {submitting ? t("action.submitting") : t("action.submit")}
           </button>
         </form>
       </div>
@@ -233,10 +322,21 @@ function CenteredCard({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="rounded-xl bg-white p-4 shadow-sm">
-      <h2 className="mb-3 text-lg font-semibold text-slate-900">{title}</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+        {action}
+      </div>
       <div className="space-y-3">{children}</div>
     </section>
   );

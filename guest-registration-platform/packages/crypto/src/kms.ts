@@ -72,7 +72,9 @@ export class LocalKmsProvider implements KmsProvider {
   }
 }
 
-export function kmsProviderFromEnv(env: NodeJS.ProcessEnv = process.env): KmsProvider {
+export async function kmsProviderFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<KmsProvider> {
   const provider = env.KMS_PROVIDER ?? "local";
   if (provider === "local") {
     const masterKey = env.LOCAL_KMS_MASTER_KEY_BASE64;
@@ -84,6 +86,9 @@ export function kmsProviderFromEnv(env: NodeJS.ProcessEnv = process.env): KmsPro
     }
     return new LocalKmsProvider(masterKey);
   }
-  // Extension point: return an AzureKeyVaultKmsProvider here.
+  if (provider === "azure-key-vault") {
+    const { AzureKeyVaultKmsProvider } = await import("./azureKeyVault.js");
+    return AzureKeyVaultKmsProvider.fromEnv(env);
+  }
   throw new Error(`Unsupported KMS_PROVIDER: ${provider}`);
 }

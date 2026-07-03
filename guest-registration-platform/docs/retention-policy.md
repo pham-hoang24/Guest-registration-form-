@@ -22,16 +22,47 @@ Every `GuestSubmission` stores at creation time:
 
 The job is idempotent and covered by tests (`apps/worker/tests/retention.test.ts`).
 
-Run manually:
+## Implementation status
 
+The cleanup job is fully implemented and tested. Two CLI entry-points are available:
+
+```sh
+# Preview: lists submission IDs that would be deleted — no DB or blob mutations
+pnpm --filter @gr/worker retention:dry-run
+
+# Execute: runs the full cleanup (blob delete → PII clear → DELETED status → audit)
+pnpm --filter @gr/worker retention:run
 ```
-pnpm --filter @gr/worker retention
+
+Both commands load environment from `../../.env` via `dotenv-cli`.
+
+## Production scheduling
+
+**Recommended: Azure Container Apps Job**
+
+Create a Container App Job with a cron schedule (e.g. `0 2 * * *` — 2 AM UTC daily) that
+runs:
+
+```sh
+pnpm --filter @gr/worker retention:run
 ```
 
-## Production TODOs
+The job is idempotent — re-running it after a partial failure is safe.
 
-- **Schedule it** (cron, Azure Container Apps job, or Service-Bus-triggered) — the MVP only
-  exposes the function and a manual command.
+**Alternative: Azure Functions Timer Trigger**
+
+If the project already uses Azure Functions, a Timer Trigger with the same cron expression
+works identically.
+
+**Dev / local**
+
+The long-running worker (`main.ts`) also runs `runRetentionCleanup` on startup and then
+every `RETENTION_INTERVAL_HOURS` hours (default 24). This covers local development but is
+not the recommended production mechanism — a dedicated scheduled job is easier to observe,
+alert on, and replay independently of the Service Bus consumer.
+
+## Remaining TODOs
+
 - **TODO(legal): verify retention periods against official Finnish requirements** for
   accommodation records (majoitusilmoitus) and align `RETENTION_DEFAULT_DAYS`, the grace
   period, and the legal basis mapping before production use. The current values are

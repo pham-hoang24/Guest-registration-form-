@@ -8,12 +8,16 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "retention": "dotenv -e ../../.env -- tsx src/runRetention.ts"
+    "start": "dotenv -e ../../.env -- tsx src/main.ts",
+    "retention": "dotenv -e ../../.env -- tsx src/runRetention.ts",
+    "retention:dry-run": "dotenv -e ../../.env -- tsx src/runRetention.ts --dry-run",
+    "retention:run": "dotenv -e ../../.env -- tsx src/runRetention.ts"
   },
   "dependencies": {
     "@gr/crypto": "workspace:*",
     "@gr/db": "workspace:*",
     "@gr/pdf": "workspace:*",
+    "@gr/queue": "workspace:*",
     "@gr/shared": "workspace:*",
     "@gr/storage": "workspace:*"
   },

@@ -6,7 +6,6 @@ import {
   REQUIREMENT_VERSION,
   SUPPORTED_LANGUAGES,
 } from "@gr/shared";
-import { generatePdfForSubmission } from "@gr/worker";
 import type { AppDeps } from "../deps.js";
 import { sendError } from "../lib/httpErrors.js";
 import { auditMetaFromRequest } from "../lib/requestMeta.js";
@@ -125,28 +124,21 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         metadata: { guestCount: data.guests.length, registrationLinkId: link.id },
       });
 
-      // MVP: the PDF job runs in-process. Failures mark the submission FAILED
-      // and are audit-logged inside the job; the guest still gets their receipt.
+      // Enqueue the PDF generation job. In-process (dev): runs synchronously
+      // with errors audit-logged by the job itself. Azure Service Bus (prod):
+      // sends a message and returns immediately; the worker handles retry/poison.
       try {
-        await generatePdfForSubmission(
-          {
-            tenantId: link.tenantId,
-            propertyId: link.propertyId,
-            submissionId: submission.id,
-          },
-          {
-            db,
-            kms: deps.kms,
-            storage: deps.storage,
-            storageProviderName: deps.storageProviderName,
-          },
-        );
+        await deps.queue.enqueuePdfJob({
+          tenantId: link.tenantId,
+          propertyId: link.propertyId,
+          submissionId: submission.id,
+        });
       } catch (error) {
         console.error(
           JSON.stringify({
             level: "error",
             requestId: req.requestId,
-            error: "pdf_generation_failed",
+            error: "pdf_job_enqueue_failed",
             submissionId: submission.id,
             cause: error instanceof Error ? error.name : "UnknownError",
           }),

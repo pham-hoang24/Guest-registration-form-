@@ -1,0 +1,56 @@
+{
+  "page": {
+    "title": "Vierasrekisteröinti",
+    "requirementVersion": "Vaatimusversio {{version}}"
+  },
+  "section": {
+    "stay": "Yöpyminen",
+    "primaryGuest": "Päävieras",
+    "additionalGuest": "Lisävieras {{n}}",
+    "confirmation": "Vahvistus"
+  },
+  "field": {
+    "arrivalDate": "Saapumispäivä",
+    "departureDate": "Lähtöpäivä",
+    "purposeOfStay": "Majoituksen tarkoitus",
+    "email": "Sähköposti",
+    "phone": "Puhelinnumero",
+    "firstName": "Etunimi",
+    "lastName": "Sukunimi",
+    "dateOfBirth": "Syntymäaika",
+    "nationality": "Kansallisuus (2 kirjaimen koodi)",
+    "address": "Kotiosoite",
+    "documentType": "Asiakirjatyyppi",
+    "documentNumber": "Asiakirjanumero"
+  },
+  "purpose": {
+    "Leisure": "Vapaa-aika",
+    "Business": "Työ",
+    "Other": "Muu"
+  },
+  "docType": {
+    "passport": "Passi",
+    "id_card": "Henkilökortti",
+    "residence_permit": "Oleskelulupa",
+    "other": "Muu"
+  },
+  "confirmation": {
+    "privacy": "Hyväksyn tietosuojailmoituksen ja ymmärrän, että tietojani käsitellään majoitusrekisteröintivelvoitteiden täyttämiseksi.",
+    "accuracy": "Vahvistan, että antamani tiedot ovat oikein."
+  },
+  "action": {
+    "submit": "Lähetä rekisteröinti",
+    "submitting": "Lähetetään…",
+    "addGuest": "Lisää vieras",
+    "removeGuest": "Poista"
+  },
+  "status": {
+    "loading": "Ladataan…",
+    "linkNotValid": "Linkki ei ole voimassa",
+    "linkExpiredDesc": "Tämä rekisteröintilinkki on virheellinen tai vanhentunut. Pyydä isäntääsi lähettämään uusi linkki.",
+    "success": "Rekisteröinti valmis",
+    "successDesc": "Kiitos. Rekisteröintisi on vastaanotettu. Viite: {{reference}}",
+    "errorLinkExpired": "Tämä rekisteröintilinkki ei ole enää voimassa.",
+    "errorGeneric": "Lähetys epäonnistui. Yritä uudelleen."
+  }
+}

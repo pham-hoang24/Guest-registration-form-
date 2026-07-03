@@ -5,7 +5,9 @@ import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { LocalKmsProvider, generateRegistrationToken, hashRegistrationToken } from "@gr/crypto";
 import { PrismaClient, type OwnerRole } from "@gr/db";
+import { InProcessQueueProducer } from "@gr/queue";
 import { LocalStorageProvider } from "@gr/storage";
+import { generatePdfForSubmission } from "@gr/worker";
 import { buildApp } from "../src/app.js";
 import { configFromEnv } from "../src/config.js";
 import type { AppDeps } from "../src/deps.js";
@@ -16,11 +18,18 @@ const TEST_KMS_MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
 export const testDb = new PrismaClient();
 
 export function buildTestDeps(): AppDeps {
+  const db = testDb;
+  const kms = new LocalKmsProvider(TEST_KMS_MASTER_KEY);
+  const storage = new LocalStorageProvider(mkdtempSync(path.join(tmpdir(), "gr-api-test-")));
+  const storageProviderName = "local";
   return {
-    db: testDb,
-    kms: new LocalKmsProvider(TEST_KMS_MASTER_KEY),
-    storage: new LocalStorageProvider(mkdtempSync(path.join(tmpdir(), "gr-api-test-"))),
-    storageProviderName: "local",
+    db,
+    kms,
+    storage,
+    storageProviderName,
+    queue: new InProcessQueueProducer((msg) =>
+      generatePdfForSubmission(msg, { db, kms, storage, storageProviderName }),
+    ),
     config: configFromEnv({ ...process.env, NODE_ENV: "test" }),
   };
 }

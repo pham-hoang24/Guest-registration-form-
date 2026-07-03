@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@gr/db";
 import type { KmsProvider } from "@gr/crypto";
 import type { StorageProvider } from "@gr/storage";
+import type { QueueProducer } from "@gr/queue";
 import type { ApiConfig } from "./config.js";
 
 export type AppDeps = {
@@ -8,5 +9,6 @@ export type AppDeps = {
   kms: KmsProvider;
   storage: StorageProvider;
   storageProviderName: string;
+  queue: QueueProducer;
   config: ApiConfig;
 };

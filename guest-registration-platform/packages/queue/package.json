@@ -1,5 +1,5 @@
 {
-  "name": "@gr/crypto",
+  "name": "@gr/queue",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,8 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@azure/identity": "^4.5.0",
-    "@azure/keyvault-keys": "^4.9.0"
+    "@azure/service-bus": "^7.9.5",
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",

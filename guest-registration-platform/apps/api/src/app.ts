@@ -11,6 +11,7 @@ import { healthRoutes } from "./routes/health.js";
 import { ownerAuthRoutes } from "./routes/ownerAuth.js";
 import { ownerPropertyRoutes } from "./routes/ownerProperties.js";
 import { ownerSubmissionRoutes } from "./routes/ownerSubmissions.js";
+import { ownerUserRoutes } from "./routes/ownerUsers.js";
 import { publicRegistrationRoutes } from "./routes/publicRegistration.js";
 
 export function buildApp(deps: AppDeps): Express {
@@ -30,6 +31,7 @@ export function buildApp(deps: AppDeps): Express {
   const ownerAuth = requireOwnerAuth(deps);
   app.use("/v1/owner/properties", ownerAuth, ownerPropertyRoutes(deps));
   app.use("/v1/owner/submissions", ownerAuth, ownerSubmissionRoutes(deps));
+  app.use("/v1/owner/users", ownerAuth, ownerUserRoutes(deps));
 
   app.use((_req, res) => {
     sendError(res, 404, "not_found");

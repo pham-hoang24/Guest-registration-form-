@@ -14,10 +14,15 @@
     "db:generate": "pnpm --filter @gr/db generate",
     "db:migrate": "pnpm --filter @gr/db migrate:dev",
     "db:seed": "pnpm --filter @gr/db seed",
+    "lint": "eslint \"**/*.{ts,tsx}\" --max-warnings 0",
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yaml,yml}\""
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.6.0",
+    "globals": "^17.7.0",
     "prettier": "^3.5.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.62.1"
   }
 }

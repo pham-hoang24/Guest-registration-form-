@@ -43,12 +43,17 @@ export class LocalStorageProvider implements StorageProvider {
   }
 }
 
-export function storageProviderFromEnv(env: NodeJS.ProcessEnv = process.env): StorageProvider {
+export async function storageProviderFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<StorageProvider> {
   const provider = env.STORAGE_PROVIDER ?? "local";
   if (provider === "local") {
     return new LocalStorageProvider(env.LOCAL_STORAGE_DIR ?? "./.local-storage");
   }
-  // Extension point: return an AzureBlobStorageProvider here.
+  if (provider === "azure-blob") {
+    const { AzureBlobStorageProvider } = await import("./azureBlob.js");
+    return AzureBlobStorageProvider.fromEnv(env);
+  }
   throw new Error(`Unsupported STORAGE_PROVIDER: ${provider}`);
 }
 

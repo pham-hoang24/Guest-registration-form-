@@ -5,6 +5,7 @@ import OwnerLoginPage from "./owner/OwnerLoginPage.js";
 import OwnerPropertiesPage from "./owner/OwnerPropertiesPage.js";
 import PropertySubmissionsPage from "./owner/PropertySubmissionsPage.js";
 import SubmissionDetailPage from "./owner/SubmissionDetailPage.js";
+import OwnerUsersPage from "./owner/OwnerUsersPage.js";
 
 export default function App() {
   return (
@@ -33,6 +34,14 @@ export default function App() {
           element={
             <RequireOwnerAuth>
               <SubmissionDetailPage />
+            </RequireOwnerAuth>
+          }
+        />
+        <Route
+          path="/owner/users"
+          element={
+            <RequireOwnerAuth>
+              <OwnerUsersPage />
             </RequireOwnerAuth>
           }
         />

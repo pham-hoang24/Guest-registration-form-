@@ -11,9 +11,11 @@
   "dependencies": {
     "@gr/shared": "workspace:*",
     "@hookform/resolvers": "^3.10.0",
+    "i18next": "^26.3.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.54.0",
+    "react-i18next": "^17.0.8",
     "react-router-dom": "^7.1.0",
     "zod": "^3.25.0"
   },

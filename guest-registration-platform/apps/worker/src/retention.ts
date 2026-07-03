@@ -10,12 +10,16 @@ export type RetentionResult = {
  * remove the encrypted PDF (blob + record), delete guest PII rows, clear
  * contact details, mark the submission DELETED and write an audit log.
  *
+ * Pass `{ dryRun: true }` to preview which submissions would be affected
+ * without making any mutations to the DB or blob storage.
+ *
  * MVP: invoked manually (`pnpm --filter @gr/worker retention`) or from tests.
  * Production should run this on a schedule (cron / Azure Container Apps job).
  */
 export async function runRetentionCleanup(
   deps: Pick<WorkerDeps, "db" | "storage">,
   now: Date = new Date(),
+  { dryRun = false }: { dryRun?: boolean } = {},
 ): Promise<RetentionResult> {
   const { db, storage } = deps;
 
@@ -30,6 +34,12 @@ export async function runRetentionCleanup(
   const deletedSubmissionIds: string[] = [];
 
   for (const submission of expired) {
+    if (dryRun) {
+      // Dry-run: report without touching any data.
+      deletedSubmissionIds.push(submission.id);
+      continue;
+    }
+
     if (submission.encryptedPdf) {
       await storage.deleteObject({ path: submission.encryptedPdf.blobPath });
       await db.encryptedPdf.delete({ where: { id: submission.encryptedPdf.id } });

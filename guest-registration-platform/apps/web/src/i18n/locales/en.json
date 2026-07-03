@@ -1,0 +1,56 @@
+{
+  "page": {
+    "title": "Guest registration",
+    "requirementVersion": "Requirement version {{version}}"
+  },
+  "section": {
+    "stay": "Stay",
+    "primaryGuest": "Primary guest",
+    "additionalGuest": "Additional guest {{n}}",
+    "confirmation": "Confirmation"
+  },
+  "field": {
+    "arrivalDate": "Arrival date",
+    "departureDate": "Departure date",
+    "purposeOfStay": "Purpose of stay",
+    "email": "Email",
+    "phone": "Phone",
+    "firstName": "First name",
+    "lastName": "Last name",
+    "dateOfBirth": "Date of birth",
+    "nationality": "Nationality (2-letter code)",
+    "address": "Home address",
+    "documentType": "Document type",
+    "documentNumber": "Document number"
+  },
+  "purpose": {
+    "Leisure": "Leisure",
+    "Business": "Business",
+    "Other": "Other"
+  },
+  "docType": {
+    "passport": "Passport",
+    "id_card": "ID card",
+    "residence_permit": "Residence permit",
+    "other": "Other"
+  },
+  "confirmation": {
+    "privacy": "I accept the privacy notice and understand my data is processed to meet accommodation registration obligations.",
+    "accuracy": "I confirm the information provided is accurate."
+  },
+  "action": {
+    "submit": "Submit registration",
+    "submitting": "Submitting…",
+    "addGuest": "Add another guest",
+    "removeGuest": "Remove"
+  },
+  "status": {
+    "loading": "Loading…",
+    "linkNotValid": "Link not valid",
+    "linkExpiredDesc": "This registration link is invalid or has expired. Please contact your host for a new link.",
+    "success": "Registration complete",
+    "successDesc": "Thank you. Your registration has been received. Reference: {{reference}}",
+    "errorLinkExpired": "This registration link is no longer valid.",
+    "errorGeneric": "Submission failed. Please try again."
+  }
+}
