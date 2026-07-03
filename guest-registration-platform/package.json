@@ -1,0 +1,23 @@
+{
+  "name": "guest-registration-platform",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @gr/api --filter @gr/web dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "db:generate": "pnpm --filter @gr/db generate",
+    "db:migrate": "pnpm --filter @gr/db migrate:dev",
+    "db:seed": "pnpm --filter @gr/db seed",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,yaml,yml}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.5.0",
+    "typescript": "^5.7.0"
+  }
+}

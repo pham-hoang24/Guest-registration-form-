@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum OwnerRole {
+  OWNER
+  MANAGER
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum LinkStatus {
+  ACTIVE
+  DISABLED
+  EXPIRED
+}
+
+enum SubmissionStatus {
+  RECEIVED
+  PDF_READY
+  FAILED
+  DELETED
+}
+
+enum LegalBasis {
+  LEGAL_OBLIGATION
+  CONTRACT
+  CONSENT
+}
+
+enum ActorType {
+  GUEST
+  OWNER
+  SYSTEM
+}
+
+enum AuditAction {
+  GUEST_REGISTRATION_SUBMITTED
+  PDF_GENERATED
+  PDF_GENERATION_FAILED
+  OWNER_LOGIN_SUCCEEDED
+  OWNER_LOGIN_FAILED
+  OWNER_VIEWED_SUBMISSION
+  OWNER_DOWNLOADED_PDF
+  RETENTION_DELETED_SUBMISSION
+}
+
+model Tenant {
+  id        String       @id @default(uuid())
+  name      String
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  users             OwnerUser[]
+  properties        Property[]
+  registrationLinks RegistrationLink[]
+  guestSubmissions  GuestSubmission[]
+  encryptedPdfs     EncryptedPdf[]
+}
+
+model OwnerUser {
+  id           String     @id @default(uuid())
+  tenantId     String
+  email        String     @unique
+  passwordHash String
+  role         OwnerRole
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model Property {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  addressLine1 String
+  addressLine2 String?
+  postalCode   String
+  city         String
+  countryCode  String
+  businessId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  registrationLinks RegistrationLink[]
+  guestSubmissions  GuestSubmission[]
+
+  @@index([tenantId])
+}
+
+model RegistrationLink {
+  id         String     @id @default(uuid())
+  tenantId   String
+  propertyId String
+  /// SHA-256 hex of the raw token. The raw token is never stored.
+  tokenHash  String     @unique
+  status     LinkStatus @default(ACTIVE)
+  expiresAt  DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  property         Property          @relation(fields: [propertyId], references: [id])
+  guestSubmissions GuestSubmission[]
+
+  @@index([tenantId, propertyId])
+}
+
+model GuestSubmission {
+  id                 String           @id @default(uuid())
+  tenantId           String
+  propertyId         String
+  registrationLinkId String
+  status             SubmissionStatus @default(RECEIVED)
+  arrivalDate        DateTime         @db.Date
+  departureDate      DateTime         @db.Date
+  purposeOfStay      String
+  requirementVersion String
+  /// Nullable so retention cleanup can clear contact PII.
+  guestEmail         String?
+  guestPhone         String?
+  submittedAt        DateTime         @default(now())
+  retainUntil        DateTime
+  deleteAfter        DateTime
+  legalBasis         LegalBasis       @default(LEGAL_OBLIGATION)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id])
+  property         Property         @relation(fields: [propertyId], references: [id])
+  registrationLink RegistrationLink @relation(fields: [registrationLinkId], references: [id])
+  guests           Guest[]
+  encryptedPdf     EncryptedPdf?
+
+  @@index([tenantId, propertyId])
+  @@index([deleteAfter, status])
+}
+
+model Guest {
+  id                      String   @id @default(uuid())
+  submissionId            String
+  firstName               String
+  lastName                String
+  dateOfBirth             DateTime @db.Date
+  nationality             String
+  address                 String
+  documentType            String
+  /// Envelope-encrypted JSON blob (see @gr/crypto encryptString). Never plaintext.
+  documentNumberEncrypted String
+  isPrimaryGuest          Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  submission GuestSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+}
+
+model EncryptedPdf {
+  id                 String   @id @default(uuid())
+  submissionId       String   @unique
+  tenantId           String
+  propertyId         String
+  storageProvider    String
+  blobPath           String
+  encryptedDekBase64 String
+  ivBase64           String
+  authTagBase64      String
+  aadJson            String
+  kekKeyId           String
+  algorithm          String
+  sha256Ciphertext   String
+  createdAt          DateTime @default(now())
+
+  submission GuestSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  tenant     Tenant          @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model AuditLog {
+  id            String      @id @default(uuid())
+  tenantId      String?
+  actorType     ActorType
+  actorId       String?
+  action        AuditAction
+  resourceType  String
+  resourceId    String?
+  /// SHA-256 hex of the client IP — raw IPs are never stored.
+  ipHash        String?
+  /// SHA-256 hex of the user agent — raw user agents are never stored.
+  userAgentHash String?
+  metadataJson  String?
+  createdAt     DateTime    @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([action, createdAt])
+}
