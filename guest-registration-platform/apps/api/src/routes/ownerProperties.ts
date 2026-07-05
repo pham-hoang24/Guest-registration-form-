@@ -53,7 +53,7 @@ export function ownerPropertyRoutes(deps: AppDeps): Router {
           purposeOfStay: true,
           requirementVersion: true,
           submittedAt: true,
-          _count: { select: { guests: true } },
+          _count: { select: { passengerCards: true } },
         },
       });
 
@@ -67,7 +67,7 @@ export function ownerPropertyRoutes(deps: AppDeps): Router {
           purposeOfStay: s.purposeOfStay,
           requirementVersion: s.requirementVersion,
           submittedAt: s.submittedAt.toISOString(),
-          guestCount: s._count.guests,
+          cardCount: s._count.passengerCards,
         })),
       });
     } catch (error) {

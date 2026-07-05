@@ -17,11 +17,18 @@ import { publicRegistrationRoutes } from "./routes/publicRegistration.js";
 export function buildApp(deps: AppDeps): Express {
   const app = express();
 
+  // Config-driven proxy trust — never set blindly to avoid IP spoofing.
+  if (deps.config.trustProxy !== false) {
+    app.set("trust proxy", deps.config.trustProxy);
+  }
+
   app.disable("x-powered-by");
   app.use(requestId);
   app.use(requestLog);
   app.use(helmet());
   app.use(cors({ origin: deps.config.publicAppUrl }));
+  // express.json only processes requests with application/json content-type;
+  // multipart/form-data requests are handled by multer in the individual routes.
   app.use(express.json({ limit: "200kb" }));
 
   app.use(healthRoutes(deps));

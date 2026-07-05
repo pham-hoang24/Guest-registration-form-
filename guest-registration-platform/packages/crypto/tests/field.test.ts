@@ -3,7 +3,14 @@ import { describe, expect, it } from "vitest";
 import { decryptString, encryptString, LocalKmsProvider } from "../src/index.js";
 
 const kms = new LocalKmsProvider(randomBytes(32).toString("base64"));
-const context = { submissionId: "submission-1", field: "documentNumber" };
+const context = {
+  tenantId: "tenant-1",
+  propertyId: "property-1",
+  guestSubmissionId: "submission-1",
+  passengerCardId: "card-1",
+  guestId: "guest-1",
+  field: "documentNumber",
+};
 
 describe("field encryption", () => {
   it("round trips a document number", async () => {
@@ -16,7 +23,7 @@ describe("field encryption", () => {
   it("rejects a sealed value moved to another submission", async () => {
     const sealed = await encryptString({ plaintext: "X1234567", context, kms });
     await expect(
-      decryptString({ sealed, context: { ...context, submissionId: "submission-2" }, kms }),
+      decryptString({ sealed, context: { ...context, guestSubmissionId: "submission-2" }, kms }),
     ).rejects.toThrow(/AAD mismatch/);
   });
 });

@@ -13,4 +13,4 @@ export const SUPPORTED_LANGUAGES = ["en", "fi", "sv"] as const;
 
 export const DOCUMENT_TYPES = ["passport", "id_card", "residence_permit", "other"] as const;
 
-export const PURPOSES_OF_STAY = ["Leisure", "Business", "Other"] as const;
+export const PURPOSES_OF_STAY = ["Leisure", "Business", "Meeting", "Other"] as const;

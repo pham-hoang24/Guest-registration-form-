@@ -2,6 +2,7 @@ import { PrismaClient } from "@prisma/client";
 
 export * from "@prisma/client";
 export * from "./audit.js";
+export * from "./fixtures.js";
 
 let client: PrismaClient | undefined;
 

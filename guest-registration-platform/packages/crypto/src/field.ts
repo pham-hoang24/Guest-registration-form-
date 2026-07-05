@@ -5,14 +5,22 @@ import type { KmsProvider } from "./kms.js";
  * Envelope encryption for small string fields (e.g. guest document numbers).
  * Same construction as PDF encryption — fresh DEK + IV per value, AES-256-GCM
  * with AAD — serialized to a single JSON string for a database column.
+ *
+ * FieldContext binds the ciphertext to the exact row it was created for.
+ * All six keys are included in the AAD in a fixed alphabetical order so the
+ * serialization is deterministic regardless of property insertion order.
  */
 export type FieldContext = {
-  submissionId: string;
+  tenantId: string;
+  propertyId: string;
+  guestSubmissionId: string;
+  passengerCardId: string;
+  guestId: string;
   field: string;
 };
 
 type SealedField = {
-  v: 1;
+  v: 2;
   encryptedDek: string;
   iv: string;
   authTag: string;
@@ -22,7 +30,15 @@ type SealedField = {
 };
 
 function buildFieldAad(context: FieldContext): string {
-  return JSON.stringify({ field: context.field, submissionId: context.submissionId });
+  // Fixed key order — must not change without a migration.
+  return JSON.stringify({
+    field: context.field,
+    guestId: context.guestId,
+    guestSubmissionId: context.guestSubmissionId,
+    passengerCardId: context.passengerCardId,
+    propertyId: context.propertyId,
+    tenantId: context.tenantId,
+  });
 }
 
 export async function encryptString(args: {
@@ -44,7 +60,7 @@ export async function encryptString(args: {
   dek.fill(0);
 
   const sealed: SealedField = {
-    v: 1,
+    v: 2,
     encryptedDek: wrapped.encryptedKey.toString("base64"),
     iv: iv.toString("base64"),
     authTag: authTag.toString("base64"),
@@ -61,7 +77,7 @@ export async function decryptString(args: {
   kms: KmsProvider;
 }): Promise<string> {
   const parsed = JSON.parse(args.sealed) as SealedField;
-  if (parsed.v !== 1) {
+  if (parsed.v !== 2) {
     throw new Error(`Unsupported sealed field version: ${parsed.v}`);
   }
   const expectedAad = buildFieldAad(args.context);

@@ -19,18 +19,28 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         where: { id: req.params.submissionId, tenantId: auth.tenantId },
         include: {
           property: { select: { id: true, name: true, city: true } },
-          guests: {
-            orderBy: { createdAt: "asc" },
-            // documentNumberEncrypted deliberately excluded: the document
-            // number is only ever visible inside the decrypted PDF.
+          passengerCards: {
+            orderBy: { cardNumber: "asc" },
             select: {
               id: true,
-              firstName: true,
-              lastName: true,
-              dateOfBirth: true,
-              nationality: true,
-              documentType: true,
-              isPrimaryGuest: true,
+              cardNumber: true,
+              cardType: true,
+              status: true,
+              submittedAt: true,
+              // documentNumberEncrypted deliberately excluded — only visible inside the PDF.
+              guests: {
+                select: {
+                  id: true,
+                  guestType: true,
+                  roleOnCard: true,
+                  firstName: true,
+                  lastName: true,
+                  dateOfBirth: true,
+                  citizenship: true,
+                  documentType: true,
+                  isAdult: true,
+                },
+              },
             },
           },
           encryptedPdf: { select: { id: true, createdAt: true } },
@@ -59,16 +69,24 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         departureDate: submission.departureDate.toISOString().slice(0, 10),
         purposeOfStay: submission.purposeOfStay,
         requirementVersion: submission.requirementVersion,
-        guestEmail: submission.guestEmail,
-        guestPhone: submission.guestPhone,
+        primaryGuestEmail: submission.primaryGuestEmail,
+        primaryGuestPhone: submission.primaryGuestPhoneE164,
         submittedAt: submission.submittedAt.toISOString(),
-        retainUntil: submission.retainUntil.toISOString(),
+        retainUntil: submission.retainUntil?.toISOString() ?? null,
         legalBasis: submission.legalBasis,
-        pdfAvailable: submission.status === "PDF_READY" && submission.encryptedPdf !== null,
-        guests: submission.guests.map((g) => ({
-          ...g,
-          dateOfBirth: g.dateOfBirth.toISOString().slice(0, 10),
+        // pdfAvailable is false for new PassengerCard-based submissions (PR1).
+        // EncryptedPdf is legacy; PR2 will introduce per-card PDF availability.
+        pdfAvailable: submission.status === "CLOSED" && submission.encryptedPdf !== null,
+        passengerCards: submission.passengerCards.map((card) => ({
+          ...card,
+          submittedAt: card.submittedAt.toISOString(),
+          guests: card.guests.map((g) => ({
+            ...g,
+            dateOfBirth: g.dateOfBirth.toISOString().slice(0, 10),
+          })),
         })),
+        // Legacy guest count for clients that still read it; from card guests.
+        guestCount: submission.passengerCards.reduce((n, c) => n + c.guests.length, 0),
       });
     } catch (error) {
       next(error);
@@ -89,7 +107,8 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
           sendError(res, 404, "not_found");
           return;
         }
-        if (submission.status !== "PDF_READY" || !submission.encryptedPdf) {
+        // pdfAvailable only for legacy EncryptedPdf rows (pre-PR1 submissions).
+        if (submission.status !== "CLOSED" || !submission.encryptedPdf) {
           sendError(res, 409, "pdf_not_ready");
           return;
         }
@@ -101,8 +120,6 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
           return;
         }
 
-        // AAD binding: the record must decrypt under the tenant/property/
-        // submission context of the row it was fetched through.
         const plaintext = await decryptPdf({
           ciphertext,
           encryptedDekBase64: record.encryptedDekBase64,

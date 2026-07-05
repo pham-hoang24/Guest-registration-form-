@@ -23,17 +23,29 @@ enum UserStatus {
   DISABLED
 }
 
-enum LinkStatus {
+enum RegistrationLinkStatus {
   ACTIVE
-  DISABLED
+  REVOKED
   EXPIRED
 }
 
-enum SubmissionStatus {
-  RECEIVED
+enum GuestSubmissionStatus {
+  OPEN
+  CLOSED
+  EXPIRED
+}
+
+enum PassengerCardStatus {
+  SUBMITTED
   PDF_READY
   FAILED
-  DELETED
+}
+
+enum PdfJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 enum LegalBasis {
@@ -50,6 +62,9 @@ enum ActorType {
 
 enum AuditAction {
   GUEST_REGISTRATION_SUBMITTED
+  PASSENGER_CARD_SUBMITTED
+  GUEST_SIGNATURE_SUBMITTED
+  PDF_JOB_CREATED
   PDF_GENERATED
   PDF_GENERATION_FAILED
   OWNER_LOGIN_SUCCEEDED
@@ -113,73 +128,158 @@ model Property {
 }
 
 model RegistrationLink {
-  id         String     @id @default(uuid())
+  id         String                 @id @default(uuid())
   tenantId   String
   propertyId String
   /// SHA-256 hex of the raw token. The raw token is never stored.
-  tokenHash  String     @unique
-  status     LinkStatus @default(ACTIVE)
+  tokenHash  String                 @unique
+  status     RegistrationLinkStatus @default(ACTIVE)
   expiresAt  DateTime?
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
 
-  tenant           Tenant            @relation(fields: [tenantId], references: [id])
-  property         Property          @relation(fields: [propertyId], references: [id])
-  guestSubmissions GuestSubmission[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  property        Property         @relation(fields: [propertyId], references: [id])
+  guestSubmission GuestSubmission?
 
   @@index([tenantId, propertyId])
 }
 
 model GuestSubmission {
-  id                 String           @id @default(uuid())
-  tenantId           String
-  propertyId         String
-  registrationLinkId String
-  status             SubmissionStatus @default(RECEIVED)
-  arrivalDate        DateTime         @db.Date
-  departureDate      DateTime         @db.Date
-  purposeOfStay      String
-  requirementVersion String
-  /// Nullable so retention cleanup can clear contact PII.
-  guestEmail         String?
-  guestPhone         String?
-  submittedAt        DateTime         @default(now())
-  retainUntil        DateTime
-  deleteAfter        DateTime
-  legalBasis         LegalBasis       @default(LEGAL_OBLIGATION)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  id                    String                @id @default(uuid())
+  tenantId              String
+  propertyId            String
+  registrationLinkId    String                @unique
+  status                GuestSubmissionStatus @default(OPEN)
+  arrivalDate           DateTime              @db.Date
+  departureDate         DateTime              @db.Date
+  purposeOfStay         String?
+  requirementVersion    String
+  maxPassengerCards     Int                   @default(20)
+  /// Set on first card submit when PII arrives; null until then.
+  retainUntil           DateTime?
+  deleteAfter           DateTime?
+  /// Soft-delete marker for retention purge.
+  deletedAt             DateTime?
+  legalBasis            LegalBasis            @default(LEGAL_OBLIGATION)
+  /// Contact info copied from primary card holder on first submit; wiped on retention purge.
+  primaryGuestName      String?
+  primaryGuestEmail     String?
+  primaryGuestPhoneE164 String?
+  submittedAt           DateTime              @default(now())
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
 
   tenant           Tenant           @relation(fields: [tenantId], references: [id])
   property         Property         @relation(fields: [propertyId], references: [id])
   registrationLink RegistrationLink @relation(fields: [registrationLinkId], references: [id])
-  guests           Guest[]
+  passengerCards   PassengerCard[]
+  /// Legacy: the PR1 submit path never writes EncryptedPdf. Owner PDF availability
+  /// is false for new passenger cards until PR2 migrates encryption per-card.
   encryptedPdf     EncryptedPdf?
 
   @@index([tenantId, propertyId])
-  @@index([deleteAfter, status])
+  @@index([deleteAfter])
+  @@index([deletedAt])
+}
+
+model PassengerCard {
+  id                      String              @id @default(uuid())
+  guestSubmissionId       String
+  /// Denormalized for authz / querying without joining through submission.
+  tenantId                String
+  propertyId              String
+  cardNumber              Int
+  cardType                String
+  countryOfEntryToFinland String?
+  cardHolderName          String?
+  cardHolderEmail         String?
+  cardHolderPhoneE164     String?
+  /// HMAC-SHA256(FINGERPRINT_PEPPER, normalizedCardJson) — plaintext credentials never included.
+  submissionFingerprint   String
+  status                  PassengerCardStatus @default(SUBMITTED)
+  requirementVersion      String
+  submittedAt             DateTime            @default(now())
+  signedAt                DateTime?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  guestSubmission GuestSubmission        @relation(fields: [guestSubmissionId], references: [id], onDelete: Cascade)
+  guests          Guest[]
+  signature       PassengerCardSignature?
+  pdfJob          PdfJob?
+
+  @@unique([guestSubmissionId, submissionFingerprint])
+  @@index([tenantId, propertyId])
+  @@index([guestSubmissionId])
 }
 
 model Guest {
-  id                      String   @id @default(uuid())
-  submissionId            String
-  firstName               String
-  lastName                String
-  dateOfBirth             DateTime @db.Date
-  nationality             String
-  address                 String
-  documentType            String
+  id                                   String   @id @default(uuid())
+  passengerCardId                      String
+  /// Denormalized for authz / querying without joining.
+  tenantId                             String
+  propertyId                           String
+  guestType                            String
+  roleOnCard                           String
+  firstName                            String
+  lastName                             String
+  dateOfBirth                          DateTime @db.Date
+  citizenship                          String?
+  isResidentInFinland                  Boolean?
+  address                              String?
+  documentType                         String?
   /// Envelope-encrypted JSON blob (see @gr/crypto encryptString). Never plaintext.
-  documentNumberEncrypted String
-  isPrimaryGuest          Boolean  @default(false)
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  documentNumberEncrypted              String?
+  /// Envelope-encrypted Finnish Personal Identity Code. Never plaintext.
+  finnishPersonalIdentityCodeEncrypted String?
+  email                                String?
+  phoneE164                            String?
+  isAdult                              Boolean
+  createdAt                            DateTime @default(now())
+  updatedAt                            DateTime @updatedAt
 
-  submission GuestSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  passengerCard PassengerCard @relation(fields: [passengerCardId], references: [id], onDelete: Cascade)
 
-  @@index([submissionId])
+  @@index([passengerCardId])
 }
 
+/// One signature per passenger card. signatureEncrypted is nullable so PR2 can wipe
+/// it after embedding the PNG into the final PDF, without needing to delete the row.
+model PassengerCardSignature {
+  id                  String   @id @default(uuid())
+  passengerCardId     String   @unique
+  /// Denormalized for authz / querying without joining.
+  tenantId            String
+  propertyId          String
+  /// encryptString output of base64-encoded PNG bytes. Never the raw PNG.
+  signatureEncrypted  String?
+  signatureSha256     String
+  signedAt            DateTime @default(now())
+  signedIpHash        String?
+  signedUserAgentHash String?
+  createdAt           DateTime @default(now())
+
+  passengerCard PassengerCard @relation(fields: [passengerCardId], references: [id], onDelete: Cascade)
+}
+
+/// Placeholder PDF generation job. PR1 only creates PENDING rows.
+/// PR2 owns PENDING → PROCESSING → COMPLETED/FAILED via generatePdfForPassengerCard.
+model PdfJob {
+  id              String       @id @default(uuid())
+  passengerCardId String       @unique
+  tenantId        String
+  propertyId      String
+  status          PdfJobStatus @default(PENDING)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  passengerCard PassengerCard @relation(fields: [passengerCardId], references: [id], onDelete: Cascade)
+}
+
+/// Legacy: written only by the old single-guest-list submit path before PR1.
+/// The PR1 submit path never writes EncryptedPdf rows. pdfAvailable is always
+/// false for new PassengerCards until PR2 migrates PDF storage per-card.
 model EncryptedPdf {
   id                 String   @id @default(uuid())
   submissionId       String   @unique

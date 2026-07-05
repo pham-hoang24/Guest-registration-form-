@@ -1,11 +1,11 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalKmsProvider, encryptString } from "@gr/crypto";
-import { PrismaClient } from "@gr/db";
+import { PrismaClient, createRegistrationLinkWithStay } from "@gr/db";
 import { LocalStorageProvider } from "@gr/storage";
-import { generatePdfForSubmission } from "../src/generatePdfForSubmission.js";
 import { runRetentionCleanup } from "../src/retention.js";
 
 const db = new PrismaClient();
@@ -14,12 +14,17 @@ const storage = new LocalStorageProvider(mkdtempSync(path.join(tmpdir(), "gr-wor
 
 async function truncateAll() {
   await db.$executeRawUnsafe(
-    'TRUNCATE TABLE "AuditLog", "EncryptedPdf", "Guest", "GuestSubmission", ' +
+    'TRUNCATE TABLE "AuditLog", "PdfJob", "PassengerCardSignature", "PassengerCard", ' +
+      '"EncryptedPdf", "Guest", "GuestSubmission", ' +
       '"RegistrationLink", "Property", "OwnerUser", "Tenant" CASCADE',
   );
 }
 
-async function seedSubmission(deleteAfter: Date) {
+/**
+ * Creates a stay with one passenger card containing one primary guest.
+ * Sets deleteAfter to the provided date.
+ */
+async function seedStay(deleteAfter: Date) {
   const tenant = await db.tenant.create({ data: { name: "T" } });
   const property = await db.property.create({
     data: {
@@ -31,42 +36,99 @@ async function seedSubmission(deleteAfter: Date) {
       countryCode: "FI",
     },
   });
-  const link = await db.registrationLink.create({
-    data: { tenantId: tenant.id, propertyId: property.id, tokenHash: `hash-${Date.now()}` },
+
+  const { stay } = await createRegistrationLinkWithStay(db, {
+    tenantId: tenant.id,
+    propertyId: property.id,
+    tokenHash: `hash-${Date.now()}`,
+    arrivalDate: new Date("2026-07-20"),
+    departureDate: new Date("2026-07-23"),
+    purposeOfStay: "Leisure",
   });
-  const submission = await db.guestSubmission.create({
+
+  // Set retention dates (simulates having submitted at least one card).
+  const updatedStay = await db.guestSubmission.update({
+    where: { id: stay.id },
     data: {
-      tenantId: tenant.id,
-      propertyId: property.id,
-      registrationLinkId: link.id,
-      arrivalDate: new Date("2026-07-20"),
-      departureDate: new Date("2026-07-23"),
-      purposeOfStay: "Leisure",
-      requirementVersion: "FI-ACCOMMODATION-2026-01",
-      guestEmail: "guest@example.com",
-      guestPhone: "+358401234567",
       retainUntil: deleteAfter,
       deleteAfter,
+      primaryGuestName: "Anna Example",
+      primaryGuestEmail: "guest@example.com",
+      primaryGuestPhoneE164: "+358401234567",
     },
   });
-  await db.guest.create({
+
+  const cardId = randomUUID();
+  const guestId = randomUUID();
+
+  const context = {
+    tenantId: tenant.id,
+    propertyId: property.id,
+    guestSubmissionId: stay.id,
+    passengerCardId: cardId,
+    guestId,
+  };
+
+  const documentNumberEncrypted = await encryptString({
+    plaintext: "X1234567",
+    context: { ...context, field: "documentNumber" },
+    kms,
+  });
+
+  const signatureEncrypted = await encryptString({
+    plaintext: "base64pngdata",
+    context: { ...context, field: "signature" },
+    kms,
+  });
+
+  await db.passengerCard.create({
     data: {
-      submissionId: submission.id,
-      firstName: "Anna",
-      lastName: "Example",
-      dateOfBirth: new Date("1995-04-12"),
-      nationality: "FI",
-      address: "Example Street 1",
-      documentType: "passport",
-      documentNumberEncrypted: await encryptString({
-        plaintext: "X1234567",
-        context: { submissionId: submission.id, field: "documentNumber" },
-        kms,
-      }),
-      isPrimaryGuest: true,
+      id: cardId,
+      guestSubmissionId: stay.id,
+      tenantId: tenant.id,
+      propertyId: property.id,
+      cardNumber: 1,
+      cardType: "PRIMARY_WITH_ALLOWED_FAMILY",
+      submissionFingerprint: `fp-${Date.now()}`,
+      requirementVersion: "FI-ACCOMMODATION-2026-01",
+      guests: {
+        create: {
+          id: guestId,
+          tenantId: tenant.id,
+          propertyId: property.id,
+          guestType: "primary",
+          roleOnCard: "primary",
+          firstName: "Anna",
+          lastName: "Example",
+          dateOfBirth: new Date("1990-04-12"),
+          citizenship: "FI",
+          isResidentInFinland: true,
+          address: "Example Street 1",
+          documentType: "passport",
+          documentNumberEncrypted,
+          email: "guest@example.com",
+          isAdult: true,
+        },
+      },
+      signature: {
+        create: {
+          tenantId: tenant.id,
+          propertyId: property.id,
+          signatureEncrypted,
+          signatureSha256: "aaaa".repeat(16),
+        },
+      },
+      pdfJob: {
+        create: {
+          tenantId: tenant.id,
+          propertyId: property.id,
+          status: "PENDING",
+        },
+      },
     },
   });
-  return { tenant, property, submission };
+
+  return { tenant, property, stay: updatedStay };
 }
 
 beforeEach(truncateAll);
@@ -75,87 +137,74 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-describe("generatePdfForSubmission", () => {
-  it("creates an encrypted PDF record and marks the submission PDF_READY", async () => {
-    const { tenant, property, submission } = await seedSubmission(new Date("2099-01-01"));
-    await generatePdfForSubmission(
-      { tenantId: tenant.id, propertyId: property.id, submissionId: submission.id },
-      { db, kms, storage, storageProviderName: "local" },
-    );
-
-    const updated = await db.guestSubmission.findFirst({
-      where: { id: submission.id, tenantId: tenant.id },
-      include: { encryptedPdf: true },
-    });
-    expect(updated!.status).toBe("PDF_READY");
-    expect(updated!.encryptedPdf).not.toBeNull();
-
-    // Stored blob is ciphertext, not a PDF.
-    const blob = await storage.getObject({ path: updated!.encryptedPdf!.blobPath });
-    expect(blob.subarray(0, 5).toString("ascii")).not.toBe("%PDF-");
-  });
-
-  it("refuses a wrong tenant scope", async () => {
-    const { property, submission } = await seedSubmission(new Date("2099-01-01"));
-    await expect(
-      generatePdfForSubmission(
-        { tenantId: "wrong-tenant", propertyId: property.id, submissionId: submission.id },
-        { db, kms, storage, storageProviderName: "local" },
-      ),
-    ).rejects.toThrow(/not found/i);
-  });
-});
-
 describe("runRetentionCleanup", () => {
-  it("deletes expired submissions' PII, PDFs and blobs, and audits it", async () => {
+  it("wipes PII, signatures and contact fields, marks deletedAt, and audits it", async () => {
     const past = new Date(Date.now() - 1000);
-    const { tenant, property, submission } = await seedSubmission(past);
-    await generatePdfForSubmission(
-      { tenantId: tenant.id, propertyId: property.id, submissionId: submission.id },
-      { db, kms, storage, storageProviderName: "local" },
-    );
-    const blobPath = (await db.encryptedPdf.findFirst({
-      where: { submissionId: submission.id },
-    }))!.blobPath;
+    const { tenant, stay } = await seedStay(past);
 
     const result = await runRetentionCleanup({ db, storage });
-    expect(result.deletedSubmissionIds).toEqual([submission.id]);
+    expect(result.deletedSubmissionIds).toEqual([stay.id]);
 
     const cleaned = await db.guestSubmission.findFirst({
-      where: { id: submission.id, tenantId: tenant.id },
-      include: { guests: true, encryptedPdf: true },
+      where: { id: stay.id, tenantId: tenant.id },
+      include: {
+        passengerCards: {
+          include: {
+            guests: true,
+            signature: true,
+          },
+        },
+      },
     });
-    expect(cleaned!.status).toBe("DELETED");
-    expect(cleaned!.guestEmail).toBeNull();
-    expect(cleaned!.guestPhone).toBeNull();
-    expect(cleaned!.guests).toHaveLength(0);
-    expect(cleaned!.encryptedPdf).toBeNull();
-    await expect(storage.getObject({ path: blobPath })).rejects.toThrow();
+    expect(cleaned!.deletedAt).not.toBeNull();
+    expect(cleaned!.primaryGuestEmail).toBeNull();
+    expect(cleaned!.primaryGuestPhoneE164).toBeNull();
+    expect(cleaned!.primaryGuestName).toBeNull();
+
+    // Guest credentials wiped.
+    const guest = cleaned!.passengerCards[0]!.guests[0]!;
+    expect(guest.documentNumberEncrypted).toBeNull();
+    expect(guest.email).toBeNull();
+
+    // Signature encrypted bytes wiped.
+    const sig = cleaned!.passengerCards[0]!.signature!;
+    expect(sig.signatureEncrypted).toBeNull();
+    // signatureSha256 and passengerCardId retained for audit trail.
+    expect(sig.signatureSha256).toBeTruthy();
 
     const audit = await db.auditLog.findFirst({
-      where: { action: "RETENTION_DELETED_SUBMISSION", resourceId: submission.id },
+      where: { action: "RETENTION_DELETED_SUBMISSION", resourceId: stay.id },
     });
     expect(audit).not.toBeNull();
     expect(audit!.actorType).toBe("SYSTEM");
   });
 
-  it("leaves unexpired submissions untouched", async () => {
-    const { tenant, submission } = await seedSubmission(new Date("2099-01-01"));
+  it("leaves unexpired stays untouched", async () => {
+    const { stay } = await seedStay(new Date("2099-01-01"));
     const result = await runRetentionCleanup({ db, storage });
     expect(result.deletedSubmissionIds).toEqual([]);
-    const untouched = await db.guestSubmission.findFirst({
-      where: { id: submission.id, tenantId: tenant.id },
-      include: { guests: true },
-    });
-    expect(untouched!.status).toBe("RECEIVED");
-    expect(untouched!.guests).toHaveLength(1);
+    const untouched = await db.guestSubmission.findUnique({ where: { id: stay.id } });
+    expect(untouched!.deletedAt).toBeNull();
+    expect(untouched!.primaryGuestEmail).toBe("guest@example.com");
   });
 
-  it("is idempotent — a second run deletes nothing", async () => {
+  it("is idempotent — a second run processes nothing", async () => {
     const past = new Date(Date.now() - 1000);
-    await seedSubmission(past);
+    await seedStay(past);
     await runRetentionCleanup({ db, storage });
     const secondRun = await runRetentionCleanup({ db, storage });
     expect(secondRun.deletedSubmissionIds).toEqual([]);
+  });
+
+  it("dry-run reports IDs without touching data", async () => {
+    const past = new Date(Date.now() - 1000);
+    const { stay } = await seedStay(past);
+    const result = await runRetentionCleanup({ db, storage }, new Date(), { dryRun: true });
+    expect(result.deletedSubmissionIds).toEqual([stay.id]);
+
+    // Nothing actually wiped.
+    const untouched = await db.guestSubmission.findUnique({ where: { id: stay.id } });
+    expect(untouched!.deletedAt).toBeNull();
+    expect(untouched!.primaryGuestEmail).toBe("guest@example.com");
   });
 });

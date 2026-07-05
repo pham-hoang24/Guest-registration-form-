@@ -15,10 +15,12 @@ function isoDate(date: Date): string {
 }
 
 /**
- * Generates, encrypts and stores the registration PDF for a submission.
- * Plaintext PDF bytes exist in memory only. The job refetches everything
- * scoped by tenantId + propertyId — it never trusts the queue payload beyond
- * using it as a lookup key.
+ * Legacy PDF generator — only runs for pre-PR1 submissions that used the old
+ * flat GuestSubmission → Guest[] model. PR2 will introduce generatePdfForPassengerCard
+ * which owns the PassengerCard SUBMITTED → PDF_READY/FAILED transition.
+ *
+ * Generates, encrypts and stores the registration PDF for a legacy submission.
+ * Plaintext PDF bytes exist in memory only.
  */
 export async function generatePdfForSubmission(
   input: GeneratePdfJobInput,
@@ -33,7 +35,11 @@ export async function generatePdfForSubmission(
       propertyId: input.propertyId,
     },
     include: {
-      guests: { orderBy: { createdAt: "asc" } },
+      passengerCards: {
+        include: {
+          guests: { orderBy: { createdAt: "asc" } },
+        },
+      },
       property: true,
     },
   });
@@ -45,22 +51,42 @@ export async function generatePdfForSubmission(
     throw new Error("Property does not belong to tenant");
   }
 
+  // Flatten guests across all passenger cards for the legacy PDF template.
+  const allGuests = submission.passengerCards.flatMap((card) => card.guests);
+
   try {
     const guests = await Promise.all(
-      submission.guests.map(async (guest) => ({
-        firstName: guest.firstName,
-        lastName: guest.lastName,
-        dateOfBirth: isoDate(guest.dateOfBirth),
-        nationality: guest.nationality,
-        address: guest.address,
-        documentType: guest.documentType,
-        documentNumber: await decryptString({
-          sealed: guest.documentNumberEncrypted,
-          context: { submissionId: submission.id, field: "documentNumber" },
-          kms,
-        }),
-        isPrimaryGuest: guest.isPrimaryGuest,
-      })),
+      allGuests.map(async (guest) => {
+        // Only decrypt document number if it exists (new model has it optional).
+        let documentNumber = "";
+        if (guest.documentNumberEncrypted) {
+          documentNumber = await decryptString({
+            sealed: guest.documentNumberEncrypted,
+            context: {
+              tenantId: submission.tenantId,
+              propertyId: submission.propertyId,
+              guestSubmissionId: submission.id,
+              // Legacy: use first card's id as a best-effort context; PR2 will handle per-card properly.
+              passengerCardId: guest.passengerCardId,
+              guestId: guest.id,
+              field: "documentNumber",
+            },
+            kms,
+          });
+        }
+
+        return {
+          firstName: guest.firstName,
+          lastName: guest.lastName,
+          dateOfBirth: isoDate(guest.dateOfBirth),
+          // citizenship replaces old nationality field.
+          nationality: guest.citizenship ?? "",
+          address: guest.address ?? "",
+          documentType: guest.documentType ?? "other",
+          documentNumber,
+          isPrimaryGuest: guest.guestType === "primary",
+        };
+      }),
     );
 
     const pdfBytes = await generateRegistrationPdf({
@@ -77,9 +103,9 @@ export async function generatePdfForSubmission(
       },
       arrivalDate: isoDate(submission.arrivalDate),
       departureDate: isoDate(submission.departureDate),
-      purposeOfStay: submission.purposeOfStay,
-      guestEmail: submission.guestEmail ?? "",
-      guestPhone: submission.guestPhone ?? "",
+      purposeOfStay: submission.purposeOfStay ?? "",
+      guestEmail: submission.primaryGuestEmail ?? "",
+      guestPhone: submission.primaryGuestPhoneE164 ?? "",
       guests,
       generatedAt: new Date(),
     });
@@ -123,9 +149,10 @@ export async function generatePdfForSubmission(
       },
     });
 
+    // Legacy status: PR2 uses PassengerCard status transitions instead.
     await db.guestSubmission.update({
       where: { id: submission.id },
-      data: { status: "PDF_READY" },
+      data: { status: "CLOSED" },
     });
 
     await writeAudit(db, {
@@ -139,7 +166,7 @@ export async function generatePdfForSubmission(
   } catch (error) {
     await db.guestSubmission.update({
       where: { id: submission.id },
-      data: { status: "FAILED" },
+      data: { status: "EXPIRED" },
     });
     await writeAudit(db, {
       tenantId: submission.tenantId,

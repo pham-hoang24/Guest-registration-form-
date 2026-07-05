@@ -4,7 +4,7 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { LocalKmsProvider, generateRegistrationToken, hashRegistrationToken } from "@gr/crypto";
-import { PrismaClient, type OwnerRole } from "@gr/db";
+import { PrismaClient, type OwnerRole, createRegistrationLinkWithStay } from "@gr/db";
 import { InProcessQueueProducer } from "@gr/queue";
 import { LocalStorageProvider } from "@gr/storage";
 import { generatePdfForSubmission } from "@gr/worker";
@@ -41,14 +41,15 @@ export function buildTestApp(): { app: Express; deps: AppDeps } {
 
 export async function truncateAll(): Promise<void> {
   await testDb.$executeRawUnsafe(
-    'TRUNCATE TABLE "AuditLog", "EncryptedPdf", "Guest", "GuestSubmission", ' +
+    'TRUNCATE TABLE "AuditLog", "PdfJob", "PassengerCardSignature", "PassengerCard", ' +
+      '"EncryptedPdf", "Guest", "GuestSubmission", ' +
       '"RegistrationLink", "Property", "OwnerUser", "Tenant" CASCADE',
   );
 }
 
 export type TestFixtures = Awaited<ReturnType<typeof seedFixtures>>;
 
-/** Two tenants, users of every role in tenant A, a property + active link each. */
+/** Two tenants, users of every role in tenant A, a property + active link+stay each. */
 export async function seedFixtures() {
   const passwordHash = await bcrypt.hash("test-password", 4);
 
@@ -86,21 +87,23 @@ export async function seedFixtures() {
   });
 
   const rawTokenA = generateRegistrationToken();
-  const linkA = await testDb.registrationLink.create({
-    data: {
-      tenantId: tenantA.id,
-      propertyId: propertyA.id,
-      tokenHash: hashRegistrationToken(rawTokenA),
-    },
+  const { link: linkA, stay: stayA } = await createRegistrationLinkWithStay(testDb, {
+    tenantId: tenantA.id,
+    propertyId: propertyA.id,
+    tokenHash: hashRegistrationToken(rawTokenA),
+    arrivalDate: new Date("2026-07-20"),
+    departureDate: new Date("2026-07-23"),
+    purposeOfStay: "Leisure",
   });
 
   const rawTokenB = generateRegistrationToken();
-  const linkB = await testDb.registrationLink.create({
-    data: {
-      tenantId: tenantB.id,
-      propertyId: propertyB.id,
-      tokenHash: hashRegistrationToken(rawTokenB),
-    },
+  const { link: linkB, stay: stayB } = await createRegistrationLinkWithStay(testDb, {
+    tenantId: tenantB.id,
+    propertyId: propertyB.id,
+    tokenHash: hashRegistrationToken(rawTokenB),
+    arrivalDate: new Date("2026-08-01"),
+    departureDate: new Date("2026-08-05"),
+    purposeOfStay: "Business",
   });
 
   return {
@@ -113,31 +116,93 @@ export async function seedFixtures() {
     propertyA,
     propertyB,
     linkA,
+    stayA,
     linkB,
+    stayB,
     rawTokenA,
     rawTokenB,
     password: "test-password",
   };
 }
 
-export const validSubmissionBody = {
-  arrivalDate: "2026-07-20",
-  departureDate: "2026-07-23",
-  purposeOfStay: "Leisure",
-  guestEmail: "guest@example.com",
-  guestPhone: "+358401234567",
-  guests: [
+/** Minimal valid PNG — 1×1 transparent pixel. */
+const VALID_PNG = Buffer.from(
+  "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6260000000020001e221bc330000000049454e44ae426082",
+  "hex",
+);
+
+export type MultipartSubmissionOptions = {
+  arrivalDate?: string;
+  departureDate?: string;
+  purposeOfStay?: string;
+  /** Extra or missing signature fields for negative testing. */
+  signatureFields?: Record<string, Buffer>;
+  additionalAdultCount?: number;
+};
+
+/**
+ * Builds a valid multipart submission request body with a single primary guest
+ * plus optionally N additional adults. Returns the payload and signature buffers
+ * as a record for use with supertest's `.attach()` and `.field()`.
+ */
+export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) {
+  const {
+    arrivalDate = "2026-07-20",
+    departureDate = "2026-07-23",
+    purposeOfStay = "Leisure",
+    additionalAdultCount = 0,
+  } = opts;
+
+  const people: object[] = [
     {
+      guestType: "primary",
       firstName: "Anna",
       lastName: "Example",
-      dateOfBirth: "1995-04-12",
-      nationality: "FI",
+      dateOfBirth: "1990-04-12",
+      isResidentInFinland: false,
+      citizenship: "DE",
+      countryOfEntryToFinland: "SE",
       address: "Example Street 1, Helsinki",
       documentType: "passport",
       documentNumber: "X1234567",
-      isPrimaryGuest: true,
+      email: "guest@example.com",
     },
-  ],
-  privacyAccepted: true,
-  accuracyConfirmed: true,
-};
+  ];
+
+  for (let i = 0; i < additionalAdultCount; i++) {
+    people.push({
+      guestType: "additional_adult",
+      firstName: `Adult${i}`,
+      lastName: "Extra",
+      dateOfBirth: "1988-01-01",
+      isResidentInFinland: false,
+      citizenship: "SE",
+      address: "Extra Street 1",
+      documentType: "passport",
+      documentNumber: `Y000000${i}`,
+      email: `adult${i}@example.com`,
+    });
+  }
+
+  const payload = JSON.stringify({
+    arrivalDate,
+    departureDate,
+    purposeOfStay,
+    privacyAccepted: true,
+    accuracyConfirmed: true,
+    people,
+  });
+
+  // Signature files: one per expected card.
+  const signatures: Record<string, Buffer> = opts.signatureFields ?? {};
+  if (!opts.signatureFields) {
+    signatures["signature_primary"] = VALID_PNG;
+    for (let i = 0; i < additionalAdultCount; i++) {
+      signatures[`signature_additionalAdult_${i}`] = VALID_PNG;
+    }
+  }
+
+  return { payload, signatures };
+}
+
+export { VALID_PNG };

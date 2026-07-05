@@ -6,12 +6,11 @@ export type RetentionResult = {
 };
 
 /**
- * Retention cleanup: for every submission past its deleteAfter date,
- * remove the encrypted PDF (blob + record), delete guest PII rows, clear
- * contact details, mark the submission DELETED and write an audit log.
+ * Retention cleanup: for every submission past its deleteAfter date that has not
+ * yet been purged (deletedAt is null), wipe PII and mark it purged.
  *
- * Pass `{ dryRun: true }` to preview which submissions would be affected
- * without making any mutations to the DB or blob storage.
+ * Pass `{ dryRun: true }` to preview which submissions would be affected without
+ * making any mutations to the DB or blob storage.
  *
  * MVP: invoked manually (`pnpm --filter @gr/worker retention`) or from tests.
  * Production should run this on a schedule (cron / Azure Container Apps job).
@@ -26,33 +25,64 @@ export async function runRetentionCleanup(
   const expired = await db.guestSubmission.findMany({
     where: {
       deleteAfter: { lte: now },
-      status: { not: "DELETED" },
+      deletedAt: null,
     },
-    include: { encryptedPdf: true },
+    include: {
+      encryptedPdf: true,
+      passengerCards: {
+        include: {
+          guests: { select: { id: true } },
+          signature: { select: { id: true } },
+        },
+      },
+    },
   });
 
   const deletedSubmissionIds: string[] = [];
 
   for (const submission of expired) {
     if (dryRun) {
-      // Dry-run: report without touching any data.
       deletedSubmissionIds.push(submission.id);
       continue;
     }
 
+    // Remove legacy encrypted PDF blob + record.
     if (submission.encryptedPdf) {
       await storage.deleteObject({ path: submission.encryptedPdf.blobPath });
       await db.encryptedPdf.delete({ where: { id: submission.encryptedPdf.id } });
     }
 
-    await db.guest.deleteMany({ where: { submissionId: submission.id } });
+    // Wipe credential fields on all guests (documentNumber, finnishPIC, contact).
+    for (const card of submission.passengerCards) {
+      for (const guest of card.guests) {
+        await db.guest.update({
+          where: { id: guest.id },
+          data: {
+            documentNumberEncrypted: null,
+            finnishPersonalIdentityCodeEncrypted: null,
+            email: null,
+            phoneE164: null,
+          },
+        });
+      }
 
+      // Wipe signature after PDF is no longer needed.
+      if (card.signature) {
+        await db.passengerCardSignature.update({
+          where: { id: card.signature.id },
+          data: { signatureEncrypted: null },
+        });
+      }
+    }
+
+    // Wipe stay-level contact info and soft-delete.
     await db.guestSubmission.update({
       where: { id: submission.id },
       data: {
-        status: "DELETED",
-        guestEmail: null,
-        guestPhone: null,
+        deletedAt: now,
+        primaryGuestName: null,
+        primaryGuestEmail: null,
+        primaryGuestPhoneE164: null,
       },
     });
 
@@ -62,7 +92,7 @@ export async function runRetentionCleanup(
       action: "RETENTION_DELETED_SUBMISSION",
       resourceType: "GuestSubmission",
       resourceId: submission.id,
-      metadata: { deleteAfter: submission.deleteAfter.toISOString() },
+      metadata: { deleteAfter: submission.deleteAfter?.toISOString() ?? "" },
     });
 
     deletedSubmissionIds.push(submission.id);
