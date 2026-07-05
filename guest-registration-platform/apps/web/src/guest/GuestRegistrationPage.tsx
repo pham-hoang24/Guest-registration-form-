@@ -1,66 +1,75 @@
-import { useEffect, useState } from "react";
-import { useForm, useFieldArray } from "react-hook-form";
+import { useCallback, useEffect, useState } from "react";
+import { useForm, useFieldArray, type UseFormRegister, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import {
-  DOCUMENT_TYPES,
-  PURPOSES_OF_STAY,
-  guestSubmissionRequestSchema,
-  type GuestSubmissionRequest,
-  type RegistrationLinkInfo,
-} from "@gr/shared";
-import { ApiError, apiGet, apiPost } from "../api/client.js";
+import { DOCUMENT_TYPES, PURPOSES_OF_STAY, type RegistrationLinkInfo } from "@gr/shared";
+import { ApiError, apiGet, apiPostMultipart } from "../api/client.js";
 import i18n from "../i18n/index.js";
+import SignatureField, { dataUrlToPngBlob } from "./SignatureField.js";
+import {
+  registrationFormSchema,
+  groupIntoCards,
+  toPayloadPeople,
+  type RegistrationForm,
+  type PersonForm,
+} from "./formSchema.js";
 
 type PageState =
   | { kind: "loading" }
   | { kind: "invalid_link" }
   | { kind: "form"; info: RegistrationLinkInfo }
   | { kind: "submitting"; info: RegistrationLinkInfo }
-  | { kind: "success"; submissionId: string }
+  | { kind: "success" }
   | { kind: "error"; info: RegistrationLinkInfo; message: string };
 
 const SUPPORTED_UI_LANGS = ["en", "fi", "sv"] as const;
 type SupportedLang = (typeof SUPPORTED_UI_LANGS)[number];
 
-const emptyGuest = (isPrimary: boolean) => ({
+const inputClass =
+  "w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none";
+
+const emptyPerson = (guestType: PersonForm["guestType"]): PersonForm => ({
+  guestType,
   firstName: "",
   lastName: "",
   dateOfBirth: "",
-  nationality: "",
+  isResidentInFinland: false,
   address: "",
-  documentType: "passport" as const,
+  documentType: "passport",
   documentNumber: "",
-  isPrimaryGuest: isPrimary,
+  citizenship: "",
+  countryOfEntryToFinland: "",
+  finnishPersonalIdentityCode: "",
+  email: "",
+  phone: "",
 });
-
-const inputClass =
-  "w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none";
-const labelClass = "block text-sm font-medium text-slate-700 mb-1";
 
 export default function GuestRegistrationPage() {
   const { token } = useParams<{ token: string }>();
   const [state, setState] = useState<PageState>({ kind: "loading" });
+  const [reviewing, setReviewing] = useState(false);
+  const [signatures, setSignatures] = useState<Record<string, string>>({});
   const { t } = useTranslation();
 
-  const form = useForm<GuestSubmissionRequest>({
-    resolver: zodResolver(guestSubmissionRequestSchema),
+  const form = useForm<RegistrationForm>({
+    resolver: zodResolver(registrationFormSchema),
     defaultValues: {
       arrivalDate: "",
       departureDate: "",
+      departureDateKnown: true,
       purposeOfStay: "Leisure",
-      guestEmail: "",
-      guestPhone: "",
-      guests: [emptyGuest(true)],
       privacyAccepted: undefined as unknown as true,
       accuracyConfirmed: undefined as unknown as true,
+      people: [emptyPerson("primary")],
     },
   });
-  const { register, handleSubmit, formState, control } = form;
+  const { register, handleSubmit, formState, control, watch, trigger } = form;
   const errors = formState.errors;
+  const { fields, append, remove } = useFieldArray({ control, name: "people" });
 
-  const { fields, append, remove } = useFieldArray({ control, name: "guests" });
+  const departureDateKnown = watch("departureDateKnown");
+  const people = watch("people");
 
   useEffect(() => {
     if (!token) {
@@ -72,19 +81,50 @@ export default function GuestRegistrationPage() {
       .catch(() => setState({ kind: "invalid_link" }));
   }, [token]);
 
+  const setSignature = useCallback((field: string, dataUrl: string) => {
+    setSignatures((prev) => ({ ...prev, [field]: dataUrl }));
+  }, []);
+
+  const goToReview = async () => {
+    if (await trigger()) setReviewing(true);
+  };
+
   const onSubmit = handleSubmit(async (data) => {
     if (state.kind !== "form" && state.kind !== "error") return;
     const info = state.info;
+
+    const cards = groupIntoCards(data.people);
+    // Every card needs a signature from its adult card holder.
+    for (const card of cards) {
+      if (!signatures[card.signatureField]) {
+        setState({ kind: "error", info, message: t("status.errorSignatureMissing") });
+        return;
+      }
+    }
+
     setState({ kind: "submitting", info });
     try {
-      const result = await apiPost<{ submissionId: string; status: string }>(
-        `/v1/public/registration-links/${token}/submissions`,
-        data,
-      );
-      setState({ kind: "success", submissionId: result.submissionId });
+      const payload = JSON.stringify({
+        arrivalDate: data.arrivalDate,
+        ...(data.departureDateKnown && data.departureDate ? { departureDate: data.departureDate } : {}),
+        departureDateKnown: data.departureDateKnown,
+        purposeOfStay: data.purposeOfStay,
+        privacyAccepted: true,
+        accuracyConfirmed: true,
+        people: toPayloadPeople(data.people),
+      });
+
+      const fd = new FormData();
+      fd.append("payload", payload);
+      for (const card of cards) {
+        fd.append(card.signatureField, dataUrlToPngBlob(signatures[card.signatureField]!), `${card.signatureField}.png`);
+      }
+
+      await apiPostMultipart(`/v1/public/registration-links/${token}/submissions`, fd);
+      setState({ kind: "success" });
     } catch (error) {
       const message =
-        error instanceof ApiError && error.code === "invalid_or_expired_link"
+        error instanceof ApiError && error.status === 410
           ? t("status.errorLinkExpired")
           : t("status.errorGeneric");
       setState({ kind: "error", info, message });
@@ -96,9 +136,7 @@ export default function GuestRegistrationPage() {
     localStorage.setItem("gr-lang", lang);
   };
 
-  if (state.kind === "loading") {
-    return <CenteredCard>{t("status.loading")}</CenteredCard>;
-  }
+  if (state.kind === "loading") return <CenteredCard>{t("status.loading")}</CenteredCard>;
   if (state.kind === "invalid_link") {
     return (
       <CenteredCard>
@@ -111,9 +149,7 @@ export default function GuestRegistrationPage() {
     return (
       <CenteredCard>
         <h1 className="text-xl font-semibold text-green-700">{t("status.success")}</h1>
-        <p className="mt-2 text-slate-600">
-          {t("status.successDesc", { reference: state.submissionId })}
-        </p>
+        <p className="mt-2 text-slate-600">{t("status.successDescCard")}</p>
       </CenteredCard>
     );
   }
@@ -121,6 +157,7 @@ export default function GuestRegistrationPage() {
   const info = state.info;
   const submitting = state.kind === "submitting";
   const currentLang = (i18n.language.slice(0, 2) ?? "en") as SupportedLang;
+  const cards = groupIntoCards(people as PersonForm[]);
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-6">
@@ -128,9 +165,7 @@ export default function GuestRegistrationPage() {
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{t("page.title")}</h1>
-            <p className="text-slate-600">
-              {info.propertyName}, {info.propertyCity}
-            </p>
+            <p className="text-slate-600">{info.propertyName}, {info.propertyCity}</p>
             <p className="mt-1 text-xs text-slate-400">
               {t("page.requirementVersion", { version: info.requirementVersion })}
             </p>
@@ -142,9 +177,7 @@ export default function GuestRegistrationPage() {
                 type="button"
                 onClick={() => changeLang(lang)}
                 className={`rounded px-2 py-1 font-medium uppercase ${
-                  currentLang === lang
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-slate-600 hover:bg-slate-100"
+                  currentLang === lang ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-100"
                 }`}
               >
                 {lang}
@@ -157,160 +190,209 @@ export default function GuestRegistrationPage() {
           <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{state.message}</div>
         )}
 
-        <form onSubmit={onSubmit} className="space-y-6" noValidate>
-          <Section title={t("section.stay")}>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label={t("field.arrivalDate")} error={errors.arrivalDate?.message}>
-                <input type="date" className={inputClass} {...register("arrivalDate")} />
+        {!reviewing ? (
+          <form className="space-y-6" noValidate>
+            <Section title={t("section.stay")}>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={t("field.arrivalDate")} error={errors.arrivalDate?.message}>
+                  <input type="date" className={inputClass} {...register("arrivalDate")} />
+                </Field>
+                <Field label={t("field.departureDate")} error={errors.departureDate?.message}>
+                  <input
+                    type="date"
+                    className={inputClass}
+                    disabled={!departureDateKnown}
+                    {...register("departureDate")}
+                  />
+                </Field>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" {...register("departureDateKnown")} />
+                <span>{t("field.departureKnownToggle")}</span>
+              </label>
+              <Field label={t("field.purposeOfStay")} error={errors.purposeOfStay?.message}>
+                <select className={inputClass} {...register("purposeOfStay")}>
+                  {PURPOSES_OF_STAY.map((p) => (
+                    <option key={p} value={p}>{t(`purpose.${p}`)}</option>
+                  ))}
+                </select>
               </Field>
-              <Field label={t("field.departureDate")} error={errors.departureDate?.message}>
-                <input type="date" className={inputClass} {...register("departureDate")} />
-              </Field>
+            </Section>
+
+            {fields.map((field, index) => (
+              <PersonSection
+                key={field.id}
+                index={index}
+                register={register}
+                errors={errors}
+                guestType={people?.[index]?.guestType ?? "primary"}
+                t={t}
+                onRemove={index > 0 ? () => remove(index) : undefined}
+              />
+            ))}
+
+            <div className="flex flex-wrap gap-2">
+              <AddButton label={t("action.addSpouse")} onClick={() => append(emptyPerson("spouse"))} />
+              <AddButton label={t("action.addChild")} onClick={() => append(emptyPerson("child"))} />
+              <AddButton label={t("action.addAdult")} onClick={() => append(emptyPerson("additional_adult"))} />
             </div>
-            <Field label={t("field.purposeOfStay")} error={errors.purposeOfStay?.message}>
-              <select className={inputClass} {...register("purposeOfStay")}>
-                {PURPOSES_OF_STAY.map((purpose) => (
-                  <option key={purpose} value={purpose}>
-                    {t(`purpose.${purpose}`)}
-                  </option>
+
+            <button
+              type="button"
+              onClick={goToReview}
+              className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
+            >
+              {t("action.review")}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={onSubmit} className="space-y-6" noValidate>
+            <div className="rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+              {t("review.cardNotice")}
+            </div>
+
+            {cards.map((card) => (
+              <Section
+                key={card.signatureField}
+                title={
+                  card.holder.guestType === "primary"
+                    ? t("review.primaryCard")
+                    : t("review.adultCard")
+                }
+              >
+                <p className="font-medium text-slate-900">
+                  {card.holder.firstName} {card.holder.lastName}
+                </p>
+                <p className="text-sm text-slate-500">{t("field.dateOfBirth")}: {card.holder.dateOfBirth}</p>
+                {card.riders.map((r, i) => (
+                  <p key={i} className="text-sm text-slate-600">
+                    {t(`guestType.${r.guestType}`)}: {r.firstName} {r.lastName} ({r.dateOfBirth})
+                  </p>
+                ))}
+                <div className="mt-3">
+                  <SignatureField
+                    label={t("review.signatureFor", { name: `${card.holder.firstName} ${card.holder.lastName}` })}
+                    onChange={(d) => setSignature(card.signatureField, d)}
+                  />
+                  {!signatures[card.signatureField] && (
+                    <p className="mt-1 text-xs text-amber-600">{t("review.signatureRequired")}</p>
+                  )}
+                </div>
+              </Section>
+            ))}
+
+            <Section title={t("section.confirmation")}>
+              <Checkbox label={t("confirmation.privacy")} error={errors.privacyAccepted?.message} {...register("privacyAccepted")} />
+              <Checkbox label={t("confirmation.accuracy")} error={errors.accuracyConfirmed?.message} {...register("accuracyConfirmed")} />
+            </Section>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setReviewing(false)}
+                className="flex-1 rounded-lg border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {t("action.back")}
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {submitting ? t("action.submitting") : t("action.submit")}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PersonSection({
+  index,
+  register,
+  errors,
+  guestType,
+  t,
+  onRemove,
+}: {
+  index: number;
+  register: UseFormRegister<RegistrationForm>;
+  errors: FieldErrors<RegistrationForm>;
+  guestType: PersonForm["guestType"];
+  t: (key: string, opts?: Record<string, unknown>) => string;
+  onRemove?: () => void;
+}) {
+  const isAdult = guestType === "primary" || guestType === "additional_adult";
+  const pe = errors.people?.[index];
+  const title =
+    index === 0 ? t("section.primaryGuest") : t(`guestType.${guestType}`);
+
+  return (
+    <Section
+      title={title}
+      action={
+        onRemove ? (
+          <button type="button" onClick={onRemove} className="text-sm text-red-600 hover:text-red-800">
+            {t("action.remove")}
+          </button>
+        ) : undefined
+      }
+    >
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={t("field.firstName")} error={pe?.firstName?.message}>
+          <input className={inputClass} {...register(`people.${index}.firstName`)} />
+        </Field>
+        <Field label={t("field.lastName")} error={pe?.lastName?.message}>
+          <input className={inputClass} {...register(`people.${index}.lastName`)} />
+        </Field>
+      </div>
+      <Field label={t("field.dateOfBirth")} error={pe?.dateOfBirth?.message}>
+        <input type="date" className={inputClass} {...register(`people.${index}.dateOfBirth`)} />
+      </Field>
+
+      {isAdult && (
+        <>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" {...register(`people.${index}.isResidentInFinland`)} />
+            <span>{t("field.isResidentInFinland")}</span>
+          </label>
+          <Field label={t("field.citizenship")} error={pe?.citizenship?.message}>
+            <input className={inputClass} placeholder="FI" maxLength={2} {...register(`people.${index}.citizenship`)} />
+          </Field>
+          <Field label={t("field.countryOfEntry")} error={pe?.countryOfEntryToFinland?.message}>
+            <input className={inputClass} placeholder="SE" maxLength={2} {...register(`people.${index}.countryOfEntryToFinland`)} />
+          </Field>
+          <Field label={t("field.address")} error={pe?.address?.message}>
+            <input className={inputClass} {...register(`people.${index}.address`)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("field.documentType")} error={pe?.documentType?.message}>
+              <select className={inputClass} {...register(`people.${index}.documentType`)}>
+                {DOCUMENT_TYPES.map((d) => (
+                  <option key={d} value={d}>{t(`docType.${d}`)}</option>
                 ))}
               </select>
             </Field>
-            <Field label={t("field.email")} error={errors.guestEmail?.message}>
-              <input
-                type="email"
-                autoComplete="email"
-                className={inputClass}
-                {...register("guestEmail")}
-              />
+            <Field label={t("field.documentNumber")} error={pe?.documentNumber?.message}>
+              <input className={inputClass} {...register(`people.${index}.documentNumber`)} />
             </Field>
-            <Field label={t("field.phone")} error={errors.guestPhone?.message}>
-              <input
-                type="tel"
-                autoComplete="tel"
-                className={inputClass}
-                {...register("guestPhone")}
-              />
+          </div>
+          <Field label={t("field.finnishPic")} error={pe?.finnishPersonalIdentityCode?.message} hint={t("field.finnishPicHint")}>
+            <input className={inputClass} {...register(`people.${index}.finnishPersonalIdentityCode`)} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("field.email")} error={pe?.email?.message}>
+              <input type="email" autoComplete="email" className={inputClass} {...register(`people.${index}.email`)} />
             </Field>
-          </Section>
-
-          {fields.map((field, index) => (
-            <Section
-              key={field.id}
-              title={
-                index === 0
-                  ? t("section.primaryGuest")
-                  : t("section.additionalGuest", { n: index })
-              }
-              action={
-                index > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => remove(index)}
-                    className="text-sm text-red-600 hover:text-red-800"
-                  >
-                    {t("action.removeGuest")}
-                  </button>
-                ) : undefined
-              }
-            >
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label={t("field.firstName")}
-                  error={errors.guests?.[index]?.firstName?.message}
-                >
-                  <input className={inputClass} {...register(`guests.${index}.firstName`)} />
-                </Field>
-                <Field
-                  label={t("field.lastName")}
-                  error={errors.guests?.[index]?.lastName?.message}
-                >
-                  <input className={inputClass} {...register(`guests.${index}.lastName`)} />
-                </Field>
-              </div>
-              <Field
-                label={t("field.dateOfBirth")}
-                error={errors.guests?.[index]?.dateOfBirth?.message}
-              >
-                <input
-                  type="date"
-                  className={inputClass}
-                  {...register(`guests.${index}.dateOfBirth`)}
-                />
-              </Field>
-              <Field
-                label={t("field.nationality")}
-                error={errors.guests?.[index]?.nationality?.message}
-              >
-                <input
-                  className={inputClass}
-                  placeholder="FI"
-                  maxLength={2}
-                  {...register(`guests.${index}.nationality`)}
-                />
-              </Field>
-              <Field
-                label={t("field.address")}
-                error={errors.guests?.[index]?.address?.message}
-              >
-                <input className={inputClass} {...register(`guests.${index}.address`)} />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label={t("field.documentType")}
-                  error={errors.guests?.[index]?.documentType?.message}
-                >
-                  <select className={inputClass} {...register(`guests.${index}.documentType`)}>
-                    {DOCUMENT_TYPES.map((docType) => (
-                      <option key={docType} value={docType}>
-                        {t(`docType.${docType}`)}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field
-                  label={t("field.documentNumber")}
-                  error={errors.guests?.[index]?.documentNumber?.message}
-                >
-                  <input className={inputClass} {...register(`guests.${index}.documentNumber`)} />
-                </Field>
-              </div>
-            </Section>
-          ))}
-
-          {fields.length < 20 && (
-            <button
-              type="button"
-              onClick={() => append(emptyGuest(false))}
-              className="w-full rounded-lg border-2 border-dashed border-slate-300 py-3 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600"
-            >
-              + {t("action.addGuest")}
-            </button>
-          )}
-
-          <Section title={t("section.confirmation")}>
-            <Checkbox
-              label={t("confirmation.privacy")}
-              error={errors.privacyAccepted?.message}
-              {...register("privacyAccepted")}
-            />
-            <Checkbox
-              label={t("confirmation.accuracy")}
-              error={errors.accuracyConfirmed?.message}
-              {...register("accuracyConfirmed")}
-            />
-          </Section>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? t("action.submitting") : t("action.submit")}
-          </button>
-        </form>
-      </div>
-    </div>
+            <Field label={t("field.phone")} error={pe?.phone?.message} hint={t("field.phoneHint")}>
+              <input type="tel" autoComplete="tel" className={inputClass} {...register(`people.${index}.phone`)} />
+            </Field>
+          </div>
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -322,15 +404,7 @@ function CenteredCard({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Section({
-  title,
-  action,
-  children,
-}: {
-  title: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="rounded-xl bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
@@ -342,21 +416,26 @@ function Section({
   );
 }
 
-function Field({
-  label,
-  error,
-  children,
-}: {
-  label: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, error, hint, children }: { label: string; error?: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
       {children}
+      {hint && !error && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
     </div>
+  );
+}
+
+function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex-1 rounded-lg border-2 border-dashed border-slate-300 py-2 text-sm font-medium text-slate-600 hover:border-blue-400 hover:text-blue-600"
+    >
+      + {label}
+    </button>
   );
 }
 

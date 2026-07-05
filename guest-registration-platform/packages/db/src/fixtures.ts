@@ -6,7 +6,9 @@ export type CreateRegistrationLinkWithStayInput = {
   propertyId: string;
   tokenHash: string;
   arrivalDate: Date;
-  departureDate: Date;
+  /** Omit together with departureDateKnown=false for an unknown-departure stay. */
+  departureDate?: Date | null;
+  departureDateKnown?: boolean;
   purposeOfStay?: string;
   maxPassengerCards?: number;
 };
@@ -36,7 +38,8 @@ export async function createRegistrationLinkWithStay(
       registrationLinkId: link.id,
       status: "OPEN",
       arrivalDate: input.arrivalDate,
-      departureDate: input.departureDate,
+      departureDate: input.departureDate ?? null,
+      departureDateKnown: input.departureDateKnown ?? input.departureDate != null,
       purposeOfStay: input.purposeOfStay ?? "Leisure",
       requirementVersion: REQUIREMENT_VERSION,
       maxPassengerCards: input.maxPassengerCards ?? 20,

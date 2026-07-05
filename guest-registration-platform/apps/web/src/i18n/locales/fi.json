@@ -6,26 +6,38 @@
   "section": {
     "stay": "Yöpyminen",
     "primaryGuest": "Päävieras",
-    "additionalGuest": "Lisävieras {{n}}",
     "confirmation": "Vahvistus"
   },
   "field": {
     "arrivalDate": "Saapumispäivä",
     "departureDate": "Lähtöpäivä",
+    "departureKnownToggle": "Tiedän lähtöpäiväni",
     "purposeOfStay": "Majoituksen tarkoitus",
     "email": "Sähköposti",
     "phone": "Puhelinnumero",
+    "phoneHint": "Sisällytä maakoodi, esim. +358…",
     "firstName": "Etunimi",
     "lastName": "Sukunimi",
     "dateOfBirth": "Syntymäaika",
-    "nationality": "Kansallisuus (2 kirjaimen koodi)",
+    "citizenship": "Kansalaisuus (2 kirjaimen koodi)",
+    "countryOfEntry": "Maa, josta saavuit Suomeen (2 kirjaimen koodi)",
     "address": "Kotiosoite",
     "documentType": "Asiakirjatyyppi",
-    "documentNumber": "Asiakirjanumero"
+    "documentNumber": "Asiakirjanumero",
+    "finnishPic": "Suomalainen henkilötunnus (jos on)",
+    "finnishPicHint": "Vain jos sinulla on; se korvaa kansalaisuusvaatimuksen.",
+    "isResidentInFinland": "Asun vakituisesti Suomessa"
+  },
+  "guestType": {
+    "primary": "Päävieras",
+    "spouse": "Puoliso",
+    "child": "Alaikäinen lapsi",
+    "additional_adult": "Lisäaikuinen"
   },
   "purpose": {
     "Leisure": "Vapaa-aika",
     "Business": "Työ",
+    "Meeting": "Kokous",
     "Other": "Muu"
   },
   "docType": {
@@ -34,23 +46,35 @@
     "residence_permit": "Oleskelulupa",
     "other": "Muu"
   },
+  "review": {
+    "cardNotice": "Jokainen lisäaikuinen muodostaa erillisen matkustajakortin ja allekirjoittaa erikseen. Puolisot ja alaikäiset lapset kirjataan päävieraan kortille.",
+    "primaryCard": "Päävieraan kortti",
+    "adultCard": "Lisäaikuisen kortti",
+    "signatureFor": "Allekirjoitus — {{name}}",
+    "signatureRequired": "Allekirjoitus vaaditaan ennen lähettämistä."
+  },
   "confirmation": {
     "privacy": "Hyväksyn tietosuojailmoituksen ja ymmärrän, että tietojani käsitellään majoitusrekisteröintivelvoitteiden täyttämiseksi.",
     "accuracy": "Vahvistan, että antamani tiedot ovat oikein."
   },
   "action": {
+    "review": "Tarkista ja allekirjoita",
+    "back": "Takaisin",
     "submit": "Lähetä rekisteröinti",
     "submitting": "Lähetetään…",
-    "addGuest": "Lisää vieras",
-    "removeGuest": "Poista"
+    "addSpouse": "Lisää puoliso",
+    "addChild": "Lisää alaikäinen lapsi",
+    "addAdult": "Lisää aikuinen",
+    "remove": "Poista"
   },
   "status": {
     "loading": "Ladataan…",
     "linkNotValid": "Linkki ei ole voimassa",
     "linkExpiredDesc": "Tämä rekisteröintilinkki on virheellinen tai vanhentunut. Pyydä isäntääsi lähettämään uusi linkki.",
     "success": "Rekisteröinti valmis",
-    "successDesc": "Kiitos. Rekisteröintisi on vastaanotettu. Viite: {{reference}}",
+    "successDescCard": "Kiitos. Matkustajakorttisi on vastaanotettu ja niitä käsitellään.",
     "errorLinkExpired": "Tämä rekisteröintilinkki ei ole enää voimassa.",
+    "errorSignatureMissing": "Anna allekirjoitus jokaiselle aikuiselle ennen lähettämistä.",
     "errorGeneric": "Lähetys epäonnistui. Yritä uudelleen."
   }
 }

@@ -152,7 +152,8 @@ model GuestSubmission {
   registrationLinkId    String                @unique
   status                GuestSubmissionStatus @default(OPEN)
   arrivalDate           DateTime              @db.Date
-  departureDate         DateTime              @db.Date
+  departureDate         DateTime?             @db.Date
+  departureDateKnown    Boolean               @default(true)
   purposeOfStay         String?
   requirementVersion    String
   maxPassengerCards     Int                   @default(20)
@@ -174,9 +175,6 @@ model GuestSubmission {
   property         Property         @relation(fields: [propertyId], references: [id])
   registrationLink RegistrationLink @relation(fields: [registrationLinkId], references: [id])
   passengerCards   PassengerCard[]
-  /// Legacy: the PR1 submit path never writes EncryptedPdf. Owner PDF availability
-  /// is false for new passenger cards until PR2 migrates encryption per-card.
-  encryptedPdf     EncryptedPdf?
 
   @@index([tenantId, propertyId])
   @@index([deleteAfter])
@@ -192,6 +190,8 @@ model PassengerCard {
   cardNumber              Int
   cardType                String
   countryOfEntryToFinland String?
+  /// Explicit reason the country-of-entry is blank: NORDIC_CITIZEN | RESIDENT_IN_FINLAND.
+  countryOfEntryNotApplicableReason String?
   cardHolderName          String?
   cardHolderEmail         String?
   cardHolderPhoneE164     String?
@@ -208,6 +208,7 @@ model PassengerCard {
   guests          Guest[]
   signature       PassengerCardSignature?
   pdfJob          PdfJob?
+  encryptedPdf    EncryptedPdf?
 
   @@unique([guestSubmissionId, submissionFingerprint])
   @@index([tenantId, propertyId])
@@ -277,12 +278,13 @@ model PdfJob {
   passengerCard PassengerCard @relation(fields: [passengerCardId], references: [id], onDelete: Cascade)
 }
 
-/// Legacy: written only by the old single-guest-list submit path before PR1.
-/// The PR1 submit path never writes EncryptedPdf rows. pdfAvailable is always
-/// false for new PassengerCards until PR2 migrates PDF storage per-card.
+/// One encrypted PDF per passenger card. Ciphertext is AES-256-GCM with a
+/// per-PDF DEK wrapped by the KMS; the AAD binds tenant/property/batch/card.
 model EncryptedPdf {
   id                 String   @id @default(uuid())
-  submissionId       String   @unique
+  passengerCardId    String   @unique
+  /// = guestSubmissionId (the registration batch this card belongs to).
+  batchId            String
   tenantId           String
   propertyId         String
   storageProvider    String
@@ -296,10 +298,11 @@ model EncryptedPdf {
   sha256Ciphertext   String
   createdAt          DateTime @default(now())
 
-  submission GuestSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  tenant     Tenant          @relation(fields: [tenantId], references: [id])
+  passengerCard PassengerCard @relation(fields: [passengerCardId], references: [id], onDelete: Cascade)
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
+  @@index([batchId])
 }
 
 model AuditLog {

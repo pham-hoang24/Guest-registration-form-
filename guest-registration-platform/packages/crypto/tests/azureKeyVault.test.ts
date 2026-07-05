@@ -117,8 +117,10 @@ describe("AzureKeyVaultKmsProvider", () => {
     const context = {
       tenantId: "t1",
       propertyId: "p1",
-      submissionId: "s1",
+      guestSubmissionId: "s1",
+      passengerCardId: "c1",
       requirementVersion: "FI-ACCOMMODATION-2026-01",
+      schemaVersion: "encrypted-passenger-card-pdf-v1",
     };
 
     const plaintext = Buffer.from("%PDF-1.7 fake pdf body");

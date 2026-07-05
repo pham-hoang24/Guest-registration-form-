@@ -6,26 +6,38 @@
   "section": {
     "stay": "Vistelse",
     "primaryGuest": "Primär gäst",
-    "additionalGuest": "Ytterligare gäst {{n}}",
     "confirmation": "Bekräftelse"
   },
   "field": {
     "arrivalDate": "Ankomstdatum",
     "departureDate": "Avresedatum",
+    "departureKnownToggle": "Jag vet mitt avresedatum",
     "purposeOfStay": "Syfte med vistelsen",
     "email": "E-post",
     "phone": "Telefon",
+    "phoneHint": "Ange landskod, t.ex. +358…",
     "firstName": "Förnamn",
     "lastName": "Efternamn",
     "dateOfBirth": "Födelsedatum",
-    "nationality": "Nationalitet (2-bokstavskod)",
+    "citizenship": "Medborgarskap / nationalitet (2-bokstavskod)",
+    "countryOfEntry": "Land du anlände från vid inresa till Finland (2-bokstavskod)",
     "address": "Hemadress",
     "documentType": "Dokumenttyp",
-    "documentNumber": "Dokumentnummer"
+    "documentNumber": "Dokumentnummer",
+    "finnishPic": "Finskt personnummer (om du har)",
+    "finnishPicHint": "Endast om du har ett; det ersätter kravet på medborgarskap.",
+    "isResidentInFinland": "Jag är bosatt i Finland"
+  },
+  "guestType": {
+    "primary": "Primär gäst",
+    "spouse": "Make/maka",
+    "child": "Minderårigt barn",
+    "additional_adult": "Ytterligare vuxen"
   },
   "purpose": {
     "Leisure": "Fritid",
     "Business": "Affärsresa",
+    "Meeting": "Möte",
     "Other": "Annat"
   },
   "docType": {
@@ -34,23 +46,35 @@
     "residence_permit": "Uppehållstillstånd",
     "other": "Annat"
   },
+  "review": {
+    "cardNotice": "Varje ytterligare vuxen bildar ett separat passagerarkort och signerar individuellt. Makar och minderåriga barn registreras på den primära gästens kort.",
+    "primaryCard": "Primär gästs kort",
+    "adultCard": "Ytterligare vuxens kort",
+    "signatureFor": "Signatur — {{name}}",
+    "signatureRequired": "En signatur krävs innan du skickar."
+  },
   "confirmation": {
     "privacy": "Jag accepterar integritetspolicyn och förstår att mina uppgifter behandlas för att uppfylla registreringsskyldigheten.",
     "accuracy": "Jag bekräftar att den angivna informationen är korrekt."
   },
   "action": {
+    "review": "Granska och signera",
+    "back": "Tillbaka",
     "submit": "Skicka registrering",
     "submitting": "Skickar…",
-    "addGuest": "Lägg till gäst",
-    "removeGuest": "Ta bort"
+    "addSpouse": "Lägg till make/maka",
+    "addChild": "Lägg till minderårigt barn",
+    "addAdult": "Lägg till vuxen",
+    "remove": "Ta bort"
   },
   "status": {
     "loading": "Läser in…",
     "linkNotValid": "Länken är ogiltig",
     "linkExpiredDesc": "Den här registreringslänken är ogiltig eller har gått ut. Kontakta din värd för att få en ny länk.",
     "success": "Registrering klar",
-    "successDesc": "Tack. Din registrering har mottagits. Referens: {{reference}}",
+    "successDescCard": "Tack. Dina passagerarkort har mottagits och behandlas.",
     "errorLinkExpired": "Den här registreringslänken är inte längre giltig.",
+    "errorSignatureMissing": "Ange en signatur för varje vuxen innan du skickar.",
     "errorGeneric": "Inlämning misslyckades. Försök igen."
   }
 }

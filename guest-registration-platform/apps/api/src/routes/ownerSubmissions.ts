@@ -1,11 +1,8 @@
 import { Router } from "express";
-import { decryptPdf, sha256Hex } from "@gr/crypto";
 import { writeAudit } from "@gr/db";
-import { PDF_DOWNLOAD_ROLES } from "@gr/shared";
 import type { AppDeps } from "../deps.js";
 import { sendError } from "../lib/httpErrors.js";
 import { auditMetaFromRequest } from "../lib/requestMeta.js";
-import { requireRole } from "../middleware/rbac.js";
 
 export function ownerSubmissionRoutes(deps: AppDeps): Router {
   const router = Router();
@@ -27,6 +24,8 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
               cardType: true,
               status: true,
               submittedAt: true,
+              countryOfEntryToFinland: true,
+              countryOfEntryNotApplicableReason: true,
               // documentNumberEncrypted deliberately excluded — only visible inside the PDF.
               guests: {
                 select: {
@@ -41,9 +40,10 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
                   isAdult: true,
                 },
               },
+              // Presence marks the card's PDF as downloadable (never expose crypto material).
+              encryptedPdf: { select: { id: true } },
             },
           },
-          encryptedPdf: { select: { id: true, createdAt: true } },
         },
       });
       if (!submission) {
@@ -61,12 +61,30 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         ...auditMetaFromRequest(req),
       });
 
+      const passengerCards = submission.passengerCards.map((card) => ({
+        id: card.id,
+        cardNumber: card.cardNumber,
+        cardType: card.cardType,
+        status: card.status,
+        submittedAt: card.submittedAt.toISOString(),
+        countryOfEntryToFinland: card.countryOfEntryToFinland,
+        countryOfEntryNotApplicableReason: card.countryOfEntryNotApplicableReason,
+        // Each passenger card is its own PDF; download via /passenger-cards/:id/pdf.
+        pdfAvailable: card.encryptedPdf !== null,
+        guests: card.guests.map((g) => ({
+          ...g,
+          dateOfBirth: g.dateOfBirth.toISOString().slice(0, 10),
+        })),
+      }));
+
       res.json({
         id: submission.id,
         status: submission.status,
         property: submission.property,
         arrivalDate: submission.arrivalDate.toISOString().slice(0, 10),
-        departureDate: submission.departureDate.toISOString().slice(0, 10),
+        // Departure is nullable when the guest didn't know it at submission time.
+        departureDate: submission.departureDate?.toISOString().slice(0, 10) ?? null,
+        departureDateKnown: submission.departureDateKnown,
         purposeOfStay: submission.purposeOfStay,
         requirementVersion: submission.requirementVersion,
         primaryGuestEmail: submission.primaryGuestEmail,
@@ -74,91 +92,15 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         submittedAt: submission.submittedAt.toISOString(),
         retainUntil: submission.retainUntil?.toISOString() ?? null,
         legalBasis: submission.legalBasis,
-        // pdfAvailable is false for new PassengerCard-based submissions (PR1).
-        // EncryptedPdf is legacy; PR2 will introduce per-card PDF availability.
-        pdfAvailable: submission.status === "CLOSED" && submission.encryptedPdf !== null,
-        passengerCards: submission.passengerCards.map((card) => ({
-          ...card,
-          submittedAt: card.submittedAt.toISOString(),
-          guests: card.guests.map((g) => ({
-            ...g,
-            dateOfBirth: g.dateOfBirth.toISOString().slice(0, 10),
-          })),
-        })),
-        // Legacy guest count for clients that still read it; from card guests.
+        // Batch is "ready" once every card has produced its PDF.
+        batchReady: passengerCards.length > 0 && passengerCards.every((c) => c.pdfAvailable),
+        passengerCards,
         guestCount: submission.passengerCards.reduce((n, c) => n + c.guests.length, 0),
       });
     } catch (error) {
       next(error);
     }
   });
-
-  router.get(
-    "/:submissionId/pdf",
-    requireRole(...PDF_DOWNLOAD_ROLES),
-    async (req, res, next) => {
-      try {
-        const auth = req.auth!;
-        const submission = await db.guestSubmission.findFirst({
-          where: { id: req.params.submissionId, tenantId: auth.tenantId },
-          include: { encryptedPdf: true },
-        });
-        if (!submission) {
-          sendError(res, 404, "not_found");
-          return;
-        }
-        // pdfAvailable only for legacy EncryptedPdf rows (pre-PR1 submissions).
-        if (submission.status !== "CLOSED" || !submission.encryptedPdf) {
-          sendError(res, 409, "pdf_not_ready");
-          return;
-        }
-        const record = submission.encryptedPdf;
-
-        const ciphertext = await deps.storage.getObject({ path: record.blobPath });
-        if (sha256Hex(ciphertext) !== record.sha256Ciphertext) {
-          sendError(res, 500, "integrity_check_failed");
-          return;
-        }
-
-        const plaintext = await decryptPdf({
-          ciphertext,
-          encryptedDekBase64: record.encryptedDekBase64,
-          ivBase64: record.ivBase64,
-          authTagBase64: record.authTagBase64,
-          aadJson: record.aadJson,
-          kekKeyId: record.kekKeyId,
-          kms: deps.kms,
-          expectedContext: {
-            tenantId: submission.tenantId,
-            propertyId: submission.propertyId,
-            submissionId: submission.id,
-            requirementVersion: submission.requirementVersion,
-          },
-        });
-
-        await writeAudit(db, {
-          tenantId: auth.tenantId,
-          actorType: "OWNER",
-          actorId: auth.userId,
-          action: "OWNER_DOWNLOADED_PDF",
-          resourceType: "GuestSubmission",
-          resourceId: submission.id,
-          ...auditMetaFromRequest(req),
-          metadata: { encryptedPdfId: record.id },
-        });
-
-        res.setHeader("content-type", "application/pdf");
-        res.setHeader(
-          "content-disposition",
-          `attachment; filename="registration-${submission.id}.pdf"`,
-        );
-        res.setHeader("cache-control", "no-store");
-        res.send(plaintext);
-      } catch (error) {
-        next(error);
-      }
-    },
-  );
 
   return router;
 }

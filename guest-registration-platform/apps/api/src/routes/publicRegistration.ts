@@ -4,7 +4,7 @@ import { Router } from "express";
 import multer from "multer";
 import { encryptString, hashRegistrationToken, computeCardFingerprint } from "@gr/crypto";
 import { writeAudit } from "@gr/db";
-import { REQUIREMENT_VERSION, SUPPORTED_LANGUAGES } from "@gr/shared";
+import { REQUIREMENT_VERSION, SUPPORTED_LANGUAGES, NORDIC_CITIZENSHIPS } from "@gr/shared";
 import type { AppDeps } from "../deps.js";
 import { buildPassengerCards, DomainValidationError } from "../domain/buildPassengerCards.js";
 import { normalizeFinnishPhone } from "../domain/phone.js";
@@ -16,6 +16,30 @@ import { publicGetRateLimit, publicPostRateLimit, publicPostHourlyRateLimit } fr
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_SIGNATURE_BYTES = 200 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const NORDIC = new Set<string>(NORDIC_CITIZENSHIPS);
+
+/**
+ * Country-of-entry is legally required unless the card holder is a Nordic citizen
+ * or resident in Finland — in which case we persist the explicit reason instead
+ * of a silent null (validated at the schema level).
+ */
+function deriveCountryOfEntry(holder: {
+  citizenship?: string | null;
+  isResidentInFinland?: boolean | null;
+  countryOfEntryToFinland?: string | null;
+}): { countryOfEntryToFinland: string | null; countryOfEntryNotApplicableReason: string | null } {
+  const country = holder.countryOfEntryToFinland ?? null;
+  if (country) {
+    return { countryOfEntryToFinland: country, countryOfEntryNotApplicableReason: null };
+  }
+  if (holder.isResidentInFinland) {
+    return { countryOfEntryToFinland: null, countryOfEntryNotApplicableReason: "RESIDENT_IN_FINLAND" };
+  }
+  if (holder.citizenship && NORDIC.has(holder.citizenship)) {
+    return { countryOfEntryToFinland: null, countryOfEntryNotApplicableReason: "NORDIC_CITIZEN" };
+  }
+  return { countryOfEntryToFinland: null, countryOfEntryNotApplicableReason: null };
+}
 
 function isPngMagic(buf: Buffer): boolean {
   if (buf.length < 8) return false;
@@ -26,28 +50,31 @@ function sha256Hex(data: Buffer | string): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-/**
- * Resolves a raw URL token to an ACTIVE, unexpired RegistrationLink with OPEN stay.
- * All unusable states (unknown, revoked, expired, non-OPEN stay) return null so the
- * caller can emit the same generic 404 — preventing token enumeration.
- */
-async function resolveActiveLink(
-  db: AppDeps["db"],
-  rawToken: string | undefined,
-): Promise<{
+type ResolvedLink = {
   link: { id: string; tenantId: string; propertyId: string; property: { name: string; city: string } };
   stay: {
     id: string;
     arrivalDate: Date;
-    departureDate: Date;
+    departureDate: Date | null;
+    departureDateKnown: boolean;
     purposeOfStay: string | null;
     requirementVersion: string;
     maxPassengerCards: number;
     retainUntil: Date | null;
     deleteAfter: Date | null;
   };
-} | null> {
-  if (!rawToken || rawToken.length > 200) return null;
+};
+
+type ResolveLinkResult =
+  | { kind: "not_found" }
+  | { kind: "unavailable" }
+  | { kind: "ok" } & ResolvedLink;
+
+async function resolveActiveLink(
+  db: AppDeps["db"],
+  rawToken: string | undefined,
+): Promise<ResolveLinkResult> {
+  if (!rawToken || rawToken.length > 200) return { kind: "not_found" };
   const link = await db.registrationLink.findUnique({
     where: { tokenHash: hashRegistrationToken(rawToken) },
     include: {
@@ -59,6 +86,7 @@ async function resolveActiveLink(
           status: true,
           arrivalDate: true,
           departureDate: true,
+          departureDateKnown: true,
           purposeOfStay: true,
           requirementVersion: true,
           maxPassengerCards: true,
@@ -68,12 +96,12 @@ async function resolveActiveLink(
       },
     },
   });
-  if (!link) return null;
-  if (link.status !== "ACTIVE") return null;
-  if (link.tenant.status !== "ACTIVE") return null;
-  if (link.expiresAt && link.expiresAt.getTime() <= Date.now()) return null;
-  if (!link.guestSubmission || link.guestSubmission.status !== "OPEN") return null;
-  return { link, stay: link.guestSubmission };
+  if (!link) return { kind: "not_found" };
+  if (link.status !== "ACTIVE") return { kind: "unavailable" };
+  if (link.tenant.status !== "ACTIVE") return { kind: "unavailable" };
+  if (link.expiresAt && link.expiresAt.getTime() <= Date.now()) return { kind: "unavailable" };
+  if (!link.guestSubmission || link.guestSubmission.status !== "OPEN") return { kind: "unavailable" };
+  return { kind: "ok", link, stay: link.guestSubmission };
 }
 
 export function publicRegistrationRoutes(deps: AppDeps): Router {
@@ -97,8 +125,12 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
     limiter(req, res, async () => {
       try {
         const resolved = await resolveActiveLink(db, rawToken);
-        if (!resolved) {
-          sendError(res, 404, "registration_link_unavailable");
+        if (resolved.kind === "not_found") {
+          sendError(res, 404, "registration_link_not_found");
+          return;
+        }
+        if (resolved.kind === "unavailable") {
+          sendError(res, 410, "registration_link_unavailable");
           return;
         }
         const { link } = resolved;
@@ -154,10 +186,14 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
     rawToken: string | undefined,
   ) {
     try {
-      // 1. Resolve link + stay — any unusable state → generic 404.
+      // 1. Resolve link + stay.
       const resolved = await resolveActiveLink(db, rawToken);
-      if (!resolved) {
-        sendError(res, 404, "registration_link_unavailable");
+      if (resolved.kind === "not_found") {
+        sendError(res, 404, "registration_link_not_found");
+        return;
+      }
+      if (resolved.kind === "unavailable") {
+        sendError(res, 410, "registration_link_unavailable");
         return;
       }
       const { link, stay } = resolved;
@@ -185,16 +221,18 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
       const payload = parsed.data;
 
       // 4. Confirm stay fields match the pre-created GuestSubmission.
-      if (payload.arrivalDate !== stay.arrivalDate.toISOString().slice(0, 10)) {
-        sendError(res, 400, "stay_field_mismatch", { arrivalDate: ["Does not match the stay"] });
-        return;
-      }
-      if (payload.departureDate !== stay.departureDate.toISOString().slice(0, 10)) {
-        sendError(res, 400, "stay_field_mismatch", { departureDate: ["Does not match the stay"] });
-        return;
-      }
-      if (stay.purposeOfStay && payload.purposeOfStay !== stay.purposeOfStay) {
-        sendError(res, 400, "stay_field_mismatch", { purposeOfStay: ["Does not match the stay"] });
+      // Departure is nullable (unknown-departure stays); compare the known-flag
+      // and the date (both null when unknown).
+      const stayDeparture = stay.departureDate
+        ? stay.departureDate.toISOString().slice(0, 10)
+        : null;
+      if (
+        payload.arrivalDate !== stay.arrivalDate.toISOString().slice(0, 10) ||
+        payload.departureDateKnown !== stay.departureDateKnown ||
+        (payload.departureDate ?? null) !== stayDeparture ||
+        (stay.purposeOfStay && payload.purposeOfStay !== stay.purposeOfStay)
+      ) {
+        sendError(res, 409, "stay_fields_mismatch");
         return;
       }
 
@@ -258,7 +296,7 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
 
       // 7. Normalize phones and compute per-card HMAC fingerprints.
       const pepper = config.fingerprintPepper;
-      const cardPrepared = cardDrafts.map((draft, i) => {
+      const cardPrepared = cardDrafts.map((draft) => {
         const fingerprint = computeCardFingerprint(
           {
             cardType: draft.cardType,
@@ -295,7 +333,10 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
       type TxResult =
         | { kind: "exact_duplicate"; cardIds: string[] }
         | { kind: "partial_overlap" }
+        | { kind: "capacity_exceeded" }
         | { kind: "inserted"; cardIds: string[] };
+
+      const incomingFingerprints = cardPrepared.map((c) => c.fingerprint);
 
       let txResult: TxResult;
       try {
@@ -310,7 +351,6 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
           });
           const existingFingerprintMap = new Map(existing.map((c) => [c.submissionFingerprint, c.id]));
 
-          const incomingFingerprints = cardPrepared.map((c) => c.fingerprint);
           const matchingIds = incomingFingerprints
             .map((fp) => existingFingerprintMap.get(fp))
             .filter((id): id is string => id !== undefined);
@@ -325,8 +365,7 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
 
           // Enforce maxPassengerCards under the lock.
           if (existing.length + cardPrepared.length > stay.maxPassengerCards) {
-            // Return partial_overlap-style 409 to avoid revealing capacity state.
-            return { kind: "partial_overlap" };
+            return { kind: "capacity_exceeded" };
           }
 
           // Determine the next card number.
@@ -445,6 +484,18 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
               ? `${primaryGuest.firstName} ${primaryGuest.lastName}`
               : undefined;
 
+            // Country-of-entry (and its not-applicable reason) come from the card
+            // holder — the primary on the family card, the adult on their own card.
+            const holder = draft.people[0]!;
+            const { countryOfEntryToFinland, countryOfEntryNotApplicableReason } =
+              deriveCountryOfEntry({
+                citizenship: "citizenship" in holder ? holder.citizenship : null,
+                isResidentInFinland:
+                  "isResidentInFinland" in holder ? holder.isResidentInFinland : null,
+                countryOfEntryToFinland:
+                  "countryOfEntryToFinland" in holder ? holder.countryOfEntryToFinland : null,
+              });
+
             await tx.passengerCard.create({
               data: {
                 id: cardId,
@@ -453,6 +504,8 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                 propertyId: link.propertyId,
                 cardNumber: cardNumber++,
                 cardType: draft.cardType,
+                countryOfEntryToFinland,
+                countryOfEntryNotApplicableReason,
                 submissionFingerprint: fingerprint,
                 requirementVersion: REQUIREMENT_VERSION,
                 cardHolderName: cardHolderName ?? null,
@@ -494,12 +547,23 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
           "code" in err &&
           (err as { code: string }).code === "P2002"
         ) {
-          // Treat as idempotent exact duplicate.
-          const existing = await db.passengerCard.findMany({
-            where: { guestSubmissionId: stay.id },
-            select: { id: true },
+          const existingCards = await db.passengerCard.findMany({
+            where: {
+              guestSubmissionId: stay.id,
+              submissionFingerprint: { in: incomingFingerprints },
+            },
+            select: { id: true, submissionFingerprint: true },
           });
-          res.status(200).json({ duplicate: true, cardIds: existing.map((c) => c.id) });
+          if (existingCards.length === incomingFingerprints.length) {
+            res.status(200).json({
+              duplicate: true,
+              cardIds: incomingFingerprints.map(
+                (fp) => existingCards.find((c) => c.submissionFingerprint === fp)!.id,
+              ),
+            });
+            return;
+          }
+          sendError(res, 409, "partial_duplicate_submission");
           return;
         }
         throw err;
@@ -521,7 +585,12 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
       }
 
       if (txResult.kind === "partial_overlap") {
-        sendError(res, 409, "duplicate_or_partial_resubmit");
+        sendError(res, 409, "partial_duplicate_submission");
+        return;
+      }
+
+      if (txResult.kind === "capacity_exceeded") {
+        sendError(res, 409, "max_passenger_cards_exceeded");
         return;
       }
 
@@ -555,11 +624,16 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         });
       }
 
-      res.status(201).json({
-        stayId: stay.id,
-        cardIds: txResult.cardIds,
-        cardCount: txResult.cardIds.length,
-      });
+      // Hand off one PDF generation job per new passenger card.
+      for (const cardId of txResult.cardIds) {
+        await deps.queue.enqueuePdfJob({
+          tenantId: link.tenantId,
+          propertyId: link.propertyId,
+          passengerCardId: cardId,
+        });
+      }
+
+      res.status(201).json({ duplicate: false, cardIds: txResult.cardIds });
     } catch (error) {
       next(error);
     }

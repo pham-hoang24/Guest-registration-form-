@@ -1,22 +1,20 @@
 import request from "supertest";
-import { createHash } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { generateRegistrationToken, hashRegistrationToken } from "@gr/crypto";
+import { createRegistrationLinkWithStay } from "@gr/db";
 import {
   VALID_PNG,
   buildMultipartSubmission,
   buildTestApp,
   seedFixtures,
   testDb,
+  testQueue,
   truncateAll,
   type TestFixtures,
 } from "./helpers.js";
 
 const { app } = buildTestApp();
 let fx: TestFixtures;
-
-function sha256Hex(data: string): string {
-  return createHash("sha256").update(data).digest("hex");
-}
 
 async function postSubmission(
   rawToken: string,
@@ -58,39 +56,39 @@ describe("GET /v1/public/registration-links/:token", () => {
     expect(JSON.stringify(res.body)).not.toContain(fx.propertyA.id);
   });
 
-  it("returns 404 registration_link_unavailable for an unknown token", async () => {
+  it("returns 404 registration_link_not_found for an unknown token", async () => {
     const res = await request(app).get("/v1/public/registration-links/not-a-real-token");
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "registration_link_unavailable" });
+    expect(res.body).toEqual({ error: "registration_link_not_found" });
   });
 
-  it("returns the same 404 for a revoked link (no enumeration)", async () => {
+  it("returns 410 for a revoked link", async () => {
     await testDb.registrationLink.update({
       where: { id: fx.linkA.id },
       data: { status: "REVOKED" },
     });
     const res = await request(app).get(`/v1/public/registration-links/${fx.rawTokenA}`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(410);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
-  it("returns the same 404 for an expired link", async () => {
+  it("returns 410 for an expired link", async () => {
     await testDb.registrationLink.update({
       where: { id: fx.linkA.id },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
     const res = await request(app).get(`/v1/public/registration-links/${fx.rawTokenA}`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(410);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
-  it("returns the same 404 when stay is CLOSED", async () => {
+  it("returns 410 when stay is CLOSED", async () => {
     await testDb.guestSubmission.update({
       where: { id: fx.stayA.id },
       data: { status: "CLOSED" },
     });
     const res = await request(app).get(`/v1/public/registration-links/${fx.rawTokenA}`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(410);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 });
@@ -103,10 +101,11 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
 
     expect(res.status).toBe(201);
-    expect(res.body.stayId).toBe(fx.stayA.id);
-    expect(res.body.cardCount).toBe(2); // primary card + 1 additional adult card
+    expect(res.body.duplicate).toBe(false);
     expect(Array.isArray(res.body.cardIds)).toBe(true);
-    expect(res.body.cardIds).toHaveLength(2);
+    expect(res.body.cardIds).toHaveLength(2); // primary card + 1 additional adult card
+    expect(res.body.stayId).toBeUndefined();
+    expect(res.body.cardCount).toBeUndefined();
 
     // Stay is still OPEN after card submit.
     const stay = await testDb.guestSubmission.findUnique({ where: { id: fx.stayA.id } });
@@ -131,6 +130,19 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(cards[0]!.cardType).toBe("PRIMARY_WITH_ALLOWED_FAMILY");
     expect(cards[1]!.cardType).toBe("ADDITIONAL_ADULT_INDIVIDUAL");
 
+    // Country-of-entry persisted per card holder: primary supplied "SE"; the
+    // additional adult is an SE (Nordic) citizen with no country → explicit reason.
+    expect(cards[0]!.countryOfEntryToFinland).toBe("SE");
+    expect(cards[0]!.countryOfEntryNotApplicableReason).toBeNull();
+    expect(cards[1]!.countryOfEntryToFinland).toBeNull();
+    expect(cards[1]!.countryOfEntryNotApplicableReason).toBe("NORDIC_CITIZEN");
+
+    // One PDF job enqueued per card.
+    expect(testQueue.messages).toHaveLength(2);
+    expect(testQueue.messages.map((m) => m.passengerCardId).sort()).toEqual(
+      [...res.body.cardIds].sort(),
+    );
+
     for (const card of cards) {
       expect(card.status).toBe("SUBMITTED");
       // Each card has exactly one PdfJob in PENDING.
@@ -143,8 +155,8 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
       expect(card.signature!.signatureSha256).toMatch(/^[0-9a-f]{64}$/);
     }
 
-    // No EncryptedPdf written by PR1 submit path.
-    const pdf = await testDb.encryptedPdf.findFirst({ where: { submissionId: fx.stayA.id } });
+    // No EncryptedPdf written by the submit path — PDFs are generated by the worker.
+    const pdf = await testDb.encryptedPdf.findFirst({ where: { batchId: fx.stayA.id } });
     expect(pdf).toBeNull();
 
     // Guests are nested under cards, not under the submission directly.
@@ -173,7 +185,8 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     const { payload, signatures } = buildMultipartSubmission();
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
     expect(res.status).toBe(201);
-    expect(res.body.cardCount).toBe(1);
+    expect(res.body.duplicate).toBe(false);
+    expect(res.body.cardIds).toHaveLength(1);
   });
 
   it("200 + duplicate:true on identical re-submission", async () => {
@@ -191,7 +204,7 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(count).toBe(1);
   });
 
-  it("409 on partial-overlap re-submission", async () => {
+  it("409 partial_duplicate_submission on partial-overlap re-submission", async () => {
     // Submit 1 card first.
     const { payload: p1, signatures: s1 } = buildMultipartSubmission();
     await postSubmission(fx.rawTokenA, p1, s1);
@@ -200,40 +213,64 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     const { payload: p2, signatures: s2 } = buildMultipartSubmission({ additionalAdultCount: 1 });
     const res = await postSubmission(fx.rawTokenA, p2, s2);
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe("duplicate_or_partial_resubmit");
+    expect(res.body.error).toBe("partial_duplicate_submission");
 
     // Only the original 1 card should exist.
     const count = await testDb.passengerCard.count({ where: { guestSubmissionId: fx.stayA.id } });
     expect(count).toBe(1);
   });
 
-  it("404 registration_link_unavailable for unknown token", async () => {
+  it("409 max_passenger_cards_exceeded when stay is at capacity", async () => {
+    await testDb.guestSubmission.update({
+      where: { id: fx.stayA.id },
+      data: { maxPassengerCards: 1 },
+    });
+    // Submit 2 cards to a stay that only allows 1.
+    const { payload, signatures } = buildMultipartSubmission({ additionalAdultCount: 1 });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("max_passenger_cards_exceeded");
+    expect(await testDb.passengerCard.count({ where: { guestSubmissionId: fx.stayA.id } })).toBe(0);
+  });
+
+  it("404 registration_link_not_found for unknown token", async () => {
     const { payload, signatures } = buildMultipartSubmission();
     const res = await postSubmission("bogus-token", payload, signatures);
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "registration_link_unavailable" });
+    expect(res.body).toEqual({ error: "registration_link_not_found" });
     expect(await testDb.passengerCard.count()).toBe(0);
   });
 
-  it("404 registration_link_unavailable for revoked link", async () => {
+  it("410 registration_link_unavailable for revoked link", async () => {
     await testDb.registrationLink.update({
       where: { id: fx.linkA.id },
       data: { status: "REVOKED" },
     });
     const { payload, signatures } = buildMultipartSubmission();
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(410);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
-  it("404 registration_link_unavailable when stay is CLOSED", async () => {
+  it("410 registration_link_unavailable for expired link", async () => {
+    await testDb.registrationLink.update({
+      where: { id: fx.linkA.id },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    const { payload, signatures } = buildMultipartSubmission();
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(410);
+    expect(res.body).toEqual({ error: "registration_link_unavailable" });
+  });
+
+  it("410 registration_link_unavailable when stay is CLOSED", async () => {
     await testDb.guestSubmission.update({
       where: { id: fx.stayA.id },
       data: { status: "CLOSED" },
     });
     const { payload, signatures } = buildMultipartSubmission();
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(410);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
@@ -254,7 +291,7 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(res.body.error).toBe("validation_failed");
   });
 
-  it("400 when departureDate <= arrivalDate", async () => {
+  it("400 when departureDate is before arrivalDate", async () => {
     const { payload, signatures } = buildMultipartSubmission({
       arrivalDate: "2026-07-20",
       departureDate: "2026-07-19",
@@ -265,14 +302,92 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(await testDb.passengerCard.count()).toBe(0);
   });
 
-  it("400 when stay fields don't match the pre-created stay", async () => {
+  it("201 for a same-day stay (departure == arrival)", async () => {
+    const rawToken = generateRegistrationToken();
+    const { stay } = await createRegistrationLinkWithStay(testDb, {
+      tenantId: fx.tenantA.id,
+      propertyId: fx.propertyA.id,
+      tokenHash: hashRegistrationToken(rawToken),
+      arrivalDate: new Date("2026-09-01"),
+      departureDate: new Date("2026-09-01"),
+    });
+    const { payload, signatures } = buildMultipartSubmission({
+      arrivalDate: "2026-09-01",
+      departureDate: "2026-09-01",
+    });
+    const res = await postSubmission(rawToken, payload, signatures);
+    expect(res.status).toBe(201);
+    expect(await testDb.passengerCard.count({ where: { guestSubmissionId: stay.id } })).toBe(1);
+  });
+
+  it("201 for an unknown-departure stay (departureDateKnown=false)", async () => {
+    const rawToken = generateRegistrationToken();
+    const { stay } = await createRegistrationLinkWithStay(testDb, {
+      tenantId: fx.tenantA.id,
+      propertyId: fx.propertyA.id,
+      tokenHash: hashRegistrationToken(rawToken),
+      arrivalDate: new Date("2026-09-01"),
+      departureDateKnown: false,
+    });
+    const { payload, signatures } = buildMultipartSubmission({
+      arrivalDate: "2026-09-01",
+      departureDateKnown: false,
+    });
+    const res = await postSubmission(rawToken, payload, signatures);
+    expect(res.status).toBe(201);
+    const persisted = await testDb.guestSubmission.findUnique({ where: { id: stay.id } });
+    expect(persisted!.departureDate).toBeNull();
+    expect(persisted!.departureDateKnown).toBe(false);
+  });
+
+  it("400 when departure is marked known but no date is provided", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      departureDateKnown: true,
+      departureDate: undefined,
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_failed");
+  });
+
+  it("persists RESIDENT_IN_FINLAND when a resident card holder omits country of entry", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      primaryOverrides: {
+        isResidentInFinland: true,
+        citizenship: "VN",
+        countryOfEntryToFinland: undefined,
+      },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(201);
+    const card = await testDb.passengerCard.findFirst({
+      where: { guestSubmissionId: fx.stayA.id },
+    });
+    expect(card!.countryOfEntryToFinland).toBeNull();
+    expect(card!.countryOfEntryNotApplicableReason).toBe("RESIDENT_IN_FINLAND");
+  });
+
+  it("400 when a non-resident, non-Nordic card holder omits country of entry", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      primaryOverrides: {
+        isResidentInFinland: false,
+        citizenship: "VN",
+        countryOfEntryToFinland: undefined,
+      },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_failed");
+  });
+
+  it("409 stay_fields_mismatch when stay fields don't match the pre-created stay", async () => {
     const { payload, signatures } = buildMultipartSubmission({
       arrivalDate: "2026-08-01", // wrong — stay has 2026-07-20
       departureDate: "2026-08-05", // keep valid ordering so Zod doesn't trip first
     });
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe("stay_field_mismatch");
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("stay_fields_mismatch");
     expect(await testDb.passengerCard.count()).toBe(0);
   });
 

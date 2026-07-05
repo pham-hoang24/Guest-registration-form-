@@ -4,8 +4,10 @@ import type { KmsProvider } from "./kms.js";
 export type EncryptionContext = {
   tenantId: string;
   propertyId: string;
-  submissionId: string;
+  guestSubmissionId: string;
+  passengerCardId: string;
   requirementVersion: string;
+  schemaVersion: string;
 };
 
 export type EncryptResult = {

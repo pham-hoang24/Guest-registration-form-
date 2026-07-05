@@ -22,7 +22,8 @@ describe("LocalStorageProvider", () => {
     const objectPath = encryptedPdfBlobPath({
       tenantId: "t1",
       propertyId: "p1",
-      submissionId: "s1",
+      batchId: "s1",
+      passengerCardId: "c1",
     });
     await storage.putObject({ path: objectPath, contentType: "application/octet-stream", body });
     const roundTrip = await storage.getObject({ path: objectPath });

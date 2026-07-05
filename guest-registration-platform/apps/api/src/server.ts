@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 dotenv.config();
 
-const [{ buildApp }, { configFromEnv }, { getDb }, { kmsProviderFromEnv }, storagePkg, { queueProducerFromEnv }, { generatePdfForSubmission }] =
+const [{ buildApp }, { configFromEnv }, { getDb }, { kmsProviderFromEnv }, storagePkg, { queueProducerFromEnv }, { generatePdfForPassengerCard }] =
   await Promise.all([
     import("./app.js"),
     import("./config.js"),
@@ -24,7 +24,7 @@ const [kms, storage] = await Promise.all([
   storagePkg.storageProviderFromEnv(),
 ]);
 const queue = await queueProducerFromEnv(process.env, {
-  inProcessHandler: (msg) => generatePdfForSubmission(msg, { db, kms, storage, storageProviderName }),
+  inProcessHandler: (msg) => generatePdfForPassengerCard(msg, { db, kms, storage, storageProviderName }),
 });
 
 const app = buildApp({ db, kms, storage, storageProviderName, queue, config });

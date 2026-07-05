@@ -57,11 +57,12 @@ export async function storageProviderFromEnv(
   throw new Error(`Unsupported STORAGE_PROVIDER: ${provider}`);
 }
 
-/** Canonical blob path for an encrypted submission PDF. */
+/** Canonical blob path for an encrypted passenger-card PDF. */
 export function encryptedPdfBlobPath(args: {
   tenantId: string;
   propertyId: string;
-  submissionId: string;
+  batchId: string;
+  passengerCardId: string;
 }): string {
-  return `tenant/${args.tenantId}/property/${args.propertyId}/submission/${args.submissionId}.pdf.enc`;
+  return `tenant/${args.tenantId}/property/${args.propertyId}/submission/${args.batchId}/card/${args.passengerCardId}.pdf.enc`;
 }

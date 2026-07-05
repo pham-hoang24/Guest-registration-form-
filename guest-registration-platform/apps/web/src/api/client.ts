@@ -62,17 +62,28 @@ export async function apiAction(path: string, token?: string): Promise<void> {
   if (!response.ok) await parseError(response);
 }
 
-/** Fetches the decrypted PDF and triggers a browser download. */
-export async function downloadPdf(submissionId: string, token: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/v1/owner/submissions/${submissionId}/pdf`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
+/**
+ * Posts a multipart/form-data body (the `payload` JSON field + one PNG file per
+ * signing adult). The browser sets the multipart boundary Content-Type itself.
+ */
+export async function apiPostMultipart<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", body: form });
+  if (!response.ok) await parseError(response);
+  return response.json() as Promise<T>;
+}
+
+/** Fetches a decrypted passenger-card PDF and triggers a browser download. */
+export async function downloadCardPdf(passengerCardId: string, token: string): Promise<void> {
+  const response = await fetch(
+    `${API_BASE_URL}/v1/owner/passenger-cards/${passengerCardId}/pdf`,
+    { headers: { authorization: `Bearer ${token}` } },
+  );
   if (!response.ok) await parseError(response);
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `registration-${submissionId}.pdf`;
+  anchor.download = `passenger-card-${passengerCardId}.pdf`;
   anchor.click();
   URL.revokeObjectURL(url);
 }

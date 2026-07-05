@@ -5,9 +5,8 @@ import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { LocalKmsProvider, generateRegistrationToken, hashRegistrationToken } from "@gr/crypto";
 import { PrismaClient, type OwnerRole, createRegistrationLinkWithStay } from "@gr/db";
-import { InProcessQueueProducer } from "@gr/queue";
+import type { QueueProducer, PdfJobMessage } from "@gr/queue";
 import { LocalStorageProvider } from "@gr/storage";
-import { generatePdfForSubmission } from "@gr/worker";
 import { buildApp } from "../src/app.js";
 import { configFromEnv } from "../src/config.js";
 import type { AppDeps } from "../src/deps.js";
@@ -16,6 +15,20 @@ import type { AppDeps } from "../src/deps.js";
 const TEST_KMS_MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
 
 export const testDb = new PrismaClient();
+
+/**
+ * Records enqueued PDF jobs without running the worker inline, so submit tests
+ * can assert one job per card while PDF generation stays decoupled (the worker
+ * is exercised directly in its own tests). Reset between tests via truncateAll.
+ */
+export class RecordingQueueProducer implements QueueProducer {
+  public readonly messages: PdfJobMessage[] = [];
+  async enqueuePdfJob(message: PdfJobMessage): Promise<void> {
+    this.messages.push(message);
+  }
+}
+
+export const testQueue = new RecordingQueueProducer();
 
 export function buildTestDeps(): AppDeps {
   const db = testDb;
@@ -27,9 +40,7 @@ export function buildTestDeps(): AppDeps {
     kms,
     storage,
     storageProviderName,
-    queue: new InProcessQueueProducer((msg) =>
-      generatePdfForSubmission(msg, { db, kms, storage, storageProviderName }),
-    ),
+    queue: testQueue,
     config: configFromEnv({ ...process.env, NODE_ENV: "test" }),
   };
 }
@@ -40,6 +51,7 @@ export function buildTestApp(): { app: Express; deps: AppDeps } {
 }
 
 export async function truncateAll(): Promise<void> {
+  testQueue.messages.length = 0;
   await testDb.$executeRawUnsafe(
     'TRUNCATE TABLE "AuditLog", "PdfJob", "PassengerCardSignature", "PassengerCard", ' +
       '"EncryptedPdf", "Guest", "GuestSubmission", ' +
@@ -125,19 +137,22 @@ export async function seedFixtures() {
   };
 }
 
-/** Minimal valid PNG — 1×1 transparent pixel. */
+/** 8×8 opaque-black RGBA PNG — genuinely decodable by pdf-lib (worker embeds it). */
 const VALID_PNG = Buffer.from(
-  "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6260000000020001e221bc330000000049454e44ae426082",
-  "hex",
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAEUlEQVR4nGNgYGD4TwCPBAUAgkg/weiby3kAAAAASUVORK5CYII=",
+  "base64",
 );
 
 export type MultipartSubmissionOptions = {
   arrivalDate?: string;
   departureDate?: string;
+  departureDateKnown?: boolean;
   purposeOfStay?: string;
   /** Extra or missing signature fields for negative testing. */
   signatureFields?: Record<string, Buffer>;
   additionalAdultCount?: number;
+  /** Overrides for the primary card holder (e.g. residency / citizenship). */
+  primaryOverrides?: Record<string, unknown>;
 };
 
 /**
@@ -148,10 +163,14 @@ export type MultipartSubmissionOptions = {
 export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) {
   const {
     arrivalDate = "2026-07-20",
-    departureDate = "2026-07-23",
+    departureDateKnown = true,
     purposeOfStay = "Leisure",
     additionalAdultCount = 0,
+    primaryOverrides = {},
   } = opts;
+  // Distinguish "not passed" (default date) from an explicit `undefined` (omit it),
+  // so callers can build a departureDateKnown:true payload with no date.
+  const departureDate = "departureDate" in opts ? opts.departureDate : "2026-07-23";
 
   const people: object[] = [
     {
@@ -166,6 +185,7 @@ export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) 
       documentType: "passport",
       documentNumber: "X1234567",
       email: "guest@example.com",
+      ...primaryOverrides,
     },
   ];
 
@@ -186,7 +206,8 @@ export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) 
 
   const payload = JSON.stringify({
     arrivalDate,
-    departureDate,
+    ...(departureDateKnown && departureDate ? { departureDate } : {}),
+    departureDateKnown,
     purposeOfStay,
     privacyAccepted: true,
     accuracyConfirmed: true,

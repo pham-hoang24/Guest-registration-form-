@@ -28,11 +28,11 @@ export async function runRetentionCleanup(
       deletedAt: null,
     },
     include: {
-      encryptedPdf: true,
       passengerCards: {
         include: {
           guests: { select: { id: true } },
           signature: { select: { id: true } },
+          encryptedPdf: { select: { id: true, blobPath: true } },
         },
       },
     },
@@ -46,14 +46,13 @@ export async function runRetentionCleanup(
       continue;
     }
 
-    // Remove legacy encrypted PDF blob + record.
-    if (submission.encryptedPdf) {
-      await storage.deleteObject({ path: submission.encryptedPdf.blobPath });
-      await db.encryptedPdf.delete({ where: { id: submission.encryptedPdf.id } });
-    }
-
-    // Wipe credential fields on all guests (documentNumber, finnishPIC, contact).
+    // Wipe credential fields on all guests + remove each card's encrypted PDF.
     for (const card of submission.passengerCards) {
+      if (card.encryptedPdf) {
+        await storage.deleteObject({ path: card.encryptedPdf.blobPath });
+        await db.encryptedPdf.delete({ where: { id: card.encryptedPdf.id } });
+      }
+
       for (const guest of card.guests) {
         await db.guest.update({
           where: { id: guest.id },

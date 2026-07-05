@@ -6,14 +6,14 @@ const [
   { getDb, disconnectDb },
   { kmsProviderFromEnv },
   storagePkg,
-  { generatePdfForSubmission },
+  { generatePdfForPassengerCard },
   { runRetentionCleanup },
   { startAzurePdfJobConsumer },
 ] = await Promise.all([
   import("@gr/db"),
   import("@gr/crypto"),
   import("@gr/storage"),
-  import("./generatePdfForSubmission.js"),
+  import("./generatePdfForPassengerCard.js"),
   import("./retention.js"),
   import("@gr/queue"),
 ]);
@@ -41,7 +41,7 @@ const consumer = await startAzurePdfJobConsumer({
   connectionString,
   queueName,
   maxDeliveryCount,
-  handler: (msg) => generatePdfForSubmission(msg, workerDeps),
+  handler: (msg) => generatePdfForPassengerCard(msg, workerDeps),
 });
 
 async function runRetention() {

@@ -63,7 +63,7 @@ export function ownerPropertyRoutes(deps: AppDeps): Router {
           id: s.id,
           status: s.status,
           arrivalDate: s.arrivalDate.toISOString().slice(0, 10),
-          departureDate: s.departureDate.toISOString().slice(0, 10),
+          departureDate: s.departureDate?.toISOString().slice(0, 10) ?? null,
           purposeOfStay: s.purposeOfStay,
           requirementVersion: s.requirementVersion,
           submittedAt: s.submittedAt.toISOString(),

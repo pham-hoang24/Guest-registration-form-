@@ -1,6 +1,6 @@
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { generatePdfForSubmission } from "@gr/worker";
+import { generatePdfForPassengerCard } from "@gr/worker";
 import {
   buildMultipartSubmission,
   buildTestApp,
@@ -13,8 +13,9 @@ import {
 const { app, deps } = buildTestApp();
 let fx: TestFixtures;
 let stayId: string;
+let cardId: string;
 
-async function postPrimarySubmission(): Promise<string> {
+async function postPrimarySubmission(): Promise<{ stayId: string; cardId: string }> {
   const { payload, signatures } = buildMultipartSubmission();
   let req = request(app)
     .post(`/v1/public/registration-links/${fx.rawTokenA}/submissions`)
@@ -24,7 +25,14 @@ async function postPrimarySubmission(): Promise<string> {
   }
   const res = await req;
   expect(res.status).toBe(201);
-  return res.body.stayId as string;
+  return { stayId: fx.stayA.id, cardId: res.body.cardIds[0] as string };
+}
+
+async function generatePdf(id: string): Promise<void> {
+  await generatePdfForPassengerCard(
+    { tenantId: fx.tenantA.id, propertyId: fx.propertyA.id, passengerCardId: id },
+    deps,
+  );
 }
 
 async function loginAs(email: string): Promise<string> {
@@ -38,7 +46,7 @@ async function loginAs(email: string): Promise<string> {
 beforeEach(async () => {
   await truncateAll();
   fx = await seedFixtures();
-  stayId = await postPrimarySubmission();
+  ({ stayId, cardId } = await postPrimarySubmission());
 });
 
 afterAll(async () => {
@@ -65,7 +73,7 @@ describe("owner property routes", () => {
     expect(res.body.submissions).toHaveLength(1);
     const listed = res.body.submissions[0];
     expect(listed.id).toBe(stayId);
-    // PR1: status stays OPEN until the worker (PR2) closes it.
+    // Stay stays OPEN even after cards get their PDFs (accepts further submissions).
     expect(listed.status).toBe("OPEN");
     expect(listed.cardCount).toBe(1);
     // The list endpoint exposes no guest names or contact details.
@@ -83,17 +91,17 @@ describe("owner property routes", () => {
 });
 
 describe("owner submission routes", () => {
-  it("returns submission detail for the owning tenant and audits the view", async () => {
+  it("returns submission detail with per-card pdfAvailable and audits the view", async () => {
     const token = await loginAs(fx.ownerA.email);
     const res = await request(app)
       .get(`/v1/owner/submissions/${stayId}`)
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
-    // PR1: pdfAvailable is false — EncryptedPdf only exists for legacy submissions.
-    expect(res.body.pdfAvailable).toBe(false);
-    expect(Array.isArray(res.body.passengerCards)).toBe(true);
     expect(res.body.passengerCards).toHaveLength(1);
     const card = res.body.passengerCards[0];
+    // No PDF yet — worker hasn't run.
+    expect(card.pdfAvailable).toBe(false);
+    expect(res.body.batchReady).toBe(false);
     expect(card.guests).toHaveLength(1);
     // Document numbers never leave the encrypted PDF.
     expect(JSON.stringify(res.body)).not.toContain("X1234567");
@@ -106,6 +114,17 @@ describe("owner submission routes", () => {
     expect(audit!.actorId).toBe(fx.ownerA.id);
   });
 
+  it("flips card pdfAvailable + batchReady true once the PDF is generated", async () => {
+    await generatePdf(cardId);
+    const token = await loginAs(fx.ownerA.email);
+    const res = await request(app)
+      .get(`/v1/owner/submissions/${stayId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.passengerCards[0].pdfAvailable).toBe(true);
+    expect(res.body.batchReady).toBe(true);
+  });
+
   it("hides another tenant's submission behind 404", async () => {
     const token = await loginAs(fx.ownerB.email);
     const res = await request(app)
@@ -114,20 +133,22 @@ describe("owner submission routes", () => {
     expect(res.status).toBe(404);
   });
 
-  it("blocks cross-tenant PDF download with 404", async () => {
+  it("blocks cross-tenant passenger-card PDF download with 404", async () => {
+    await generatePdf(cardId);
     const token = await loginAs(fx.ownerB.email);
     const res = await request(app)
-      .get(`/v1/owner/submissions/${stayId}/pdf`)
+      .get(`/v1/owner/passenger-cards/${cardId}/pdf`)
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
   });
 });
 
-describe("PDF download RBAC", () => {
+describe("passenger-card PDF download RBAC", () => {
   it("denies VIEWER with 403 and no audit download entry", async () => {
+    await generatePdf(cardId);
     const token = await loginAs(fx.viewerA.email);
     const res = await request(app)
-      .get(`/v1/owner/submissions/${stayId}/pdf`)
+      .get(`/v1/owner/passenger-cards/${cardId}/pdf`)
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(403);
     expect(res.body).toEqual({ error: "forbidden" });
@@ -139,19 +160,14 @@ describe("PDF download RBAC", () => {
   });
 
   it.each(["ownerA", "managerA"] as const)(
-    "allows %s to download a decrypted PDF and audits it",
+    "allows %s to download a decrypted card PDF and audits it",
     async (userKey) => {
-      // Seed a legacy EncryptedPdf by running the worker in-process.
-      // The worker reads passengerCards.flatMap(c => c.guests) added by the PR1 submit.
-      await generatePdfForSubmission(
-        { tenantId: fx.tenantA.id, propertyId: fx.propertyA.id, submissionId: stayId },
-        deps,
-      );
+      await generatePdf(cardId);
 
       const user = fx[userKey];
       const token = await loginAs(user.email);
       const res = await request(app)
-        .get(`/v1/owner/submissions/${stayId}/pdf`)
+        .get(`/v1/owner/passenger-cards/${cardId}/pdf`)
         .set("authorization", `Bearer ${token}`)
         .buffer(true)
         .parse((response, callback) => {
@@ -166,7 +182,7 @@ describe("PDF download RBAC", () => {
       expect(body.subarray(0, 5).toString("ascii")).toBe("%PDF-");
 
       const audit = await testDb.auditLog.findFirst({
-        where: { action: "OWNER_DOWNLOADED_PDF", resourceId: stayId },
+        where: { action: "OWNER_DOWNLOADED_PDF", resourceId: cardId },
       });
       expect(audit).not.toBeNull();
       expect(audit!.actorId).toBe(user.id);
@@ -174,11 +190,10 @@ describe("PDF download RBAC", () => {
     },
   );
 
-  it("returns 409 when the PDF is not ready", async () => {
-    // PR1: a fresh submission has status=OPEN and no EncryptedPdf → 409 naturally.
+  it("returns 409 when the card PDF is not ready", async () => {
     const token = await loginAs(fx.ownerA.email);
     const res = await request(app)
-      .get(`/v1/owner/submissions/${stayId}/pdf`)
+      .get(`/v1/owner/passenger-cards/${cardId}/pdf`)
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: "pdf_not_ready" });

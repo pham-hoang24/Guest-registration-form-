@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { isoDateSchema, DOCUMENT_TYPES, PURPOSES_OF_STAY } from "@gr/shared";
+import { isoDateSchema, DOCUMENT_TYPES, PURPOSES_OF_STAY, NORDIC_CITIZENSHIPS, ageOn } from "@gr/shared";
 
 const MAX_SHORT = 100;
 const MAX_MEDIUM = 200;
 
-const NORDIC_COUNTRIES = new Set(["FI", "SE", "NO", "DK", "IS"]);
+const NORDIC_COUNTRIES = new Set<string>(NORDIC_CITIZENSHIPS);
 
 const nameFields = {
   firstName: z.string().trim().min(1).max(MAX_SHORT),
@@ -108,7 +108,8 @@ function validateAdultFields(data: AdultPerson, ctx: z.RefinementCtx, path: (str
 export const payloadSchema = z
   .object({
     arrivalDate: isoDateSchema,
-    departureDate: isoDateSchema,
+    departureDate: isoDateSchema.optional(),
+    departureDateKnown: z.boolean(),
     purposeOfStay: z.enum(PURPOSES_OF_STAY),
     privacyAccepted: z.literal(true, {
       errorMap: () => ({ message: "Privacy notice must be accepted" }),
@@ -119,10 +120,19 @@ export const payloadSchema = z
     people: z.array(personSchema).min(1).max(21),
   })
   .superRefine((data, ctx) => {
-    if (data.departureDate <= data.arrivalDate) {
+    // Departure is optional only when explicitly marked unknown. Same-day stays
+    // are allowed (departure == arrival); only an earlier departure is rejected.
+    if (data.departureDateKnown && !data.departureDate) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Departure date must be after arrival date",
+        message: "Departure date is required when known",
+        path: ["departureDate"],
+      });
+    }
+    if (data.departureDate && data.departureDate < data.arrivalDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Departure date cannot be before arrival date",
         path: ["departureDate"],
       });
     }
@@ -136,12 +146,9 @@ export const payloadSchema = z
       });
     }
 
-    const arrivalMs = new Date(`${data.arrivalDate}T00:00:00Z`).getTime();
-
     for (let i = 0; i < data.people.length; i++) {
       const p = data.people[i]!;
-      const dobMs = new Date(`${p.dateOfBirth}T00:00:00Z`).getTime();
-      const ageAtArrival = (arrivalMs - dobMs) / (365.25 * 24 * 60 * 60 * 1000);
+      const ageAtArrival = ageOn(p.dateOfBirth, data.arrivalDate);
 
       if (p.guestType === "primary" || p.guestType === "additional_adult") {
         if (ageAtArrival < 18) {

@@ -5,7 +5,7 @@ import type { PdfJobHandler } from "../src/messages.js";
 const validMessage = {
   tenantId: "00000000-0000-0000-0000-000000000001",
   propertyId: "00000000-0000-0000-0000-000000000002",
-  submissionId: "00000000-0000-0000-0000-000000000003",
+  passengerCardId: "00000000-0000-0000-0000-000000000003",
 };
 
 describe("processPdfJobDelivery", () => {

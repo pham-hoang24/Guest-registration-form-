@@ -13,8 +13,10 @@ const kms = new LocalKmsProvider(randomBytes(32).toString("base64"));
 const context: EncryptionContext = {
   tenantId: "tenant-1",
   propertyId: "property-1",
-  submissionId: "submission-1",
+  guestSubmissionId: "submission-1",
+  passengerCardId: "card-1",
   requirementVersion: "FI-ACCOMMODATION-2026-01",
+  schemaVersion: "encrypted-passenger-card-pdf-v1",
 };
 
 const plaintext = Buffer.from("%PDF-1.7 fake pdf bytes for testing", "utf8");
