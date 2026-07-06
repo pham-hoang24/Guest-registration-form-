@@ -13,20 +13,22 @@ export const isoDateSchema = z
     return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
   }, "Invalid calendar date");
 
-export const guestSchema = z.object({
-  firstName: z.string().trim().min(1).max(MAX_SHORT),
-  lastName: z.string().trim().min(1).max(MAX_SHORT),
-  dateOfBirth: isoDateSchema,
-  nationality: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z]{2}$/, "Nationality must be an ISO 3166-1 alpha-2 code")
-    .transform((value) => value.toUpperCase()),
-  address: z.string().trim().min(1).max(MAX_MEDIUM),
-  documentType: z.enum(DOCUMENT_TYPES),
-  documentNumber: z.string().trim().min(1).max(MAX_SHORT),
-  isPrimaryGuest: z.boolean(),
-});
+export const guestSchema = z
+  .object({
+    firstName: z.string().trim().min(1).max(MAX_SHORT),
+    lastName: z.string().trim().min(1).max(MAX_SHORT),
+    dateOfBirth: isoDateSchema,
+    nationality: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{2}$/, "Nationality must be an ISO 3166-1 alpha-2 code")
+      .transform((value) => value.toUpperCase()),
+    address: z.string().trim().min(1).max(MAX_MEDIUM),
+    documentType: z.enum(DOCUMENT_TYPES),
+    documentNumber: z.string().trim().min(1).max(MAX_SHORT),
+    isPrimaryGuest: z.boolean(),
+  })
+  .strict();
 
 export const guestSubmissionRequestSchema = z
   .object({
@@ -46,6 +48,7 @@ export const guestSubmissionRequestSchema = z
       errorMap: () => ({ message: "Accuracy of information must be confirmed" }),
     }),
   })
+  .strict()
   .refine((data) => data.departureDate > data.arrivalDate, {
     message: "Departure date must be after arrival date",
     path: ["departureDate"],
