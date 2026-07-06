@@ -1,11 +1,30 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { decryptPdf, sha256Hex } from "@gr/crypto";
 import { writeAudit } from "@gr/db";
 import { PDF_DOWNLOAD_ROLES } from "@gr/shared";
 import type { AppDeps } from "../deps.js";
 import { sendError } from "../lib/httpErrors.js";
 import { auditMetaFromRequest } from "../lib/requestMeta.js";
-import { requireRole } from "../middleware/rbac.js";
+
+async function auditUnauthorizedAccess(deps: AppDeps, req: Request, resourceId: string | null): Promise<void> {
+  try {
+    await writeAudit(deps.db, {
+      tenantId: req.auth?.tenantId ?? null,
+      actorType: "OWNER",
+      actorId: req.auth?.userId ?? null,
+      action: "UNAUTHORIZED_ACCESS_ATTEMPT",
+      resourceType: "GuestSubmission",
+      resourceId,
+      ...auditMetaFromRequest(req),
+      metadata: {
+        route: req.originalUrl,
+        role: req.auth?.role ?? "UNKNOWN",
+      },
+    });
+  } catch {
+    // Best effort only: audit failure must not turn a 403/404 into a noisy leak.
+  }
+}
 
 export function ownerSubmissionRoutes(deps: AppDeps): Router {
   const router = Router();
@@ -33,10 +52,17 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
               isPrimaryGuest: true,
             },
           },
-          encryptedPdf: { select: { id: true, createdAt: true } },
+          encryptedPdf: { select: { id: true, createdAt: true, sha256Ciphertext: true } },
         },
       });
       if (!submission) {
+        const existing = await db.guestSubmission.findUnique({
+          where: { id: req.params.submissionId },
+          select: { id: true, tenantId: true },
+        });
+        if (existing && existing.tenantId !== auth.tenantId) {
+          await auditUnauthorizedAccess(deps, req, existing.id);
+        }
         sendError(res, 404, "not_found");
         return;
       }
@@ -45,7 +71,7 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         tenantId: auth.tenantId,
         actorType: "OWNER",
         actorId: auth.userId,
-        action: "OWNER_VIEWED_SUBMISSION",
+        action: "OWNER_VIEWED_SUBMISSION_DETAIL",
         resourceType: "GuestSubmission",
         resourceId: submission.id,
         ...auditMetaFromRequest(req),
@@ -65,6 +91,13 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         retainUntil: submission.retainUntil.toISOString(),
         legalBasis: submission.legalBasis,
         pdfAvailable: submission.status === "PDF_READY" && submission.encryptedPdf !== null,
+        pdf: submission.encryptedPdf
+          ? {
+              ready: submission.status === "PDF_READY",
+              sha256: submission.encryptedPdf.sha256Ciphertext,
+              encryptedAt: submission.encryptedPdf.createdAt.toISOString(),
+            }
+          : null,
         guests: submission.guests.map((g) => ({
           ...g,
           dateOfBirth: g.dateOfBirth.toISOString().slice(0, 10),
@@ -75,35 +108,74 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
     }
   });
 
-  router.get(
-    "/:submissionId/pdf",
-    requireRole(...PDF_DOWNLOAD_ROLES),
-    async (req, res, next) => {
-      try {
-        const auth = req.auth!;
-        const submission = await db.guestSubmission.findFirst({
-          where: { id: req.params.submissionId, tenantId: auth.tenantId },
-          include: { encryptedPdf: true },
+  router.get("/:submissionId/pdf", async (req, res, next) => {
+    try {
+      const auth = req.auth!;
+      if (!PDF_DOWNLOAD_ROLES.includes(auth.role)) {
+        await auditUnauthorizedAccess(deps, req, req.params.submissionId);
+        sendError(res, 403, "forbidden");
+        return;
+      }
+
+      const submission = await db.guestSubmission.findFirst({
+        where: { id: req.params.submissionId, tenantId: auth.tenantId },
+        include: { encryptedPdf: true },
+      });
+      if (!submission) {
+        const existing = await db.guestSubmission.findUnique({
+          where: { id: req.params.submissionId },
+          select: { id: true, tenantId: true },
         });
-        if (!submission) {
-          sendError(res, 404, "not_found");
-          return;
+        if (existing && existing.tenantId !== auth.tenantId) {
+          await auditUnauthorizedAccess(deps, req, existing.id);
         }
-        if (submission.status !== "PDF_READY" || !submission.encryptedPdf) {
-          sendError(res, 409, "pdf_not_ready");
-          return;
-        }
-        const record = submission.encryptedPdf;
+        sendError(res, 404, "not_found");
+        return;
+      }
+      if (submission.status !== "PDF_READY" || !submission.encryptedPdf) {
+        sendError(res, 409, "pdf_not_ready");
+        return;
+      }
+      const record = submission.encryptedPdf;
 
-        const ciphertext = await deps.storage.getObject({ path: record.blobPath });
-        if (sha256Hex(ciphertext) !== record.sha256Ciphertext) {
-          sendError(res, 500, "integrity_check_failed");
-          return;
-        }
+      let ciphertext: Buffer;
+      try {
+        ciphertext = await deps.storage.getObject({ path: record.blobPath });
+      } catch {
+        await writeAudit(db, {
+          tenantId: auth.tenantId,
+          actorType: "OWNER",
+          actorId: auth.userId,
+          action: "PDF_DECRYPT_FAILED",
+          resourceType: "GuestSubmission",
+          resourceId: submission.id,
+          ...auditMetaFromRequest(req),
+          metadata: { encryptedPdfId: record.id, stage: "read_ciphertext" },
+        });
+        sendError(res, 500, "pdf_could_not_be_retrieved");
+        return;
+      }
 
+      if (sha256Hex(ciphertext) !== record.sha256Ciphertext) {
+        await writeAudit(db, {
+          tenantId: auth.tenantId,
+          actorType: "OWNER",
+          actorId: auth.userId,
+          action: "PDF_INTEGRITY_FAILED",
+          resourceType: "GuestSubmission",
+          resourceId: submission.id,
+          ...auditMetaFromRequest(req),
+          metadata: { encryptedPdfId: record.id },
+        });
+        sendError(res, 500, "pdf_could_not_be_retrieved");
+        return;
+      }
+
+      let plaintext: Buffer;
+      try {
         // AAD binding: the record must decrypt under the tenant/property/
         // submission context of the row it was fetched through.
-        const plaintext = await decryptPdf({
+        plaintext = await decryptPdf({
           ciphertext,
           encryptedDekBase64: record.encryptedDekBase64,
           ivBase64: record.ivBase64,
@@ -118,30 +190,43 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
             requirementVersion: submission.requirementVersion,
           },
         });
-
+      } catch {
         await writeAudit(db, {
           tenantId: auth.tenantId,
           actorType: "OWNER",
           actorId: auth.userId,
-          action: "OWNER_DOWNLOADED_PDF",
+          action: "PDF_DECRYPT_FAILED",
           resourceType: "GuestSubmission",
           resourceId: submission.id,
           ...auditMetaFromRequest(req),
-          metadata: { encryptedPdfId: record.id },
+          metadata: { encryptedPdfId: record.id, stage: "decrypt" },
         });
-
-        res.setHeader("content-type", "application/pdf");
-        res.setHeader(
-          "content-disposition",
-          `attachment; filename="registration-${submission.id}.pdf"`,
-        );
-        res.setHeader("cache-control", "no-store");
-        res.send(plaintext);
-      } catch (error) {
-        next(error);
+        sendError(res, 500, "pdf_could_not_be_retrieved");
+        return;
       }
-    },
-  );
+
+      await writeAudit(db, {
+        tenantId: auth.tenantId,
+        actorType: "OWNER",
+        actorId: auth.userId,
+        action: "OWNER_DOWNLOADED_PDF",
+        resourceType: "GuestSubmission",
+        resourceId: submission.id,
+        ...auditMetaFromRequest(req),
+        metadata: { encryptedPdfId: record.id },
+      });
+
+      res.setHeader("content-type", "application/pdf");
+      res.setHeader(
+        "content-disposition",
+        `attachment; filename="guest-registration-${submission.id}.pdf"`,
+      );
+      res.setHeader("cache-control", "no-store");
+      res.send(plaintext);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   return router;
 }
