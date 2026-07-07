@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { describe, expect, it } from "vitest";
 import { payloadSchema } from "../src/domain/submissionSchema.js";
 
@@ -125,5 +126,25 @@ describe("payloadSchema — reduced family members", () => {
         ],
       }).success,
     ).toBe(true);
+  });
+});
+
+function hasUnrecognizedKey(issues: z.ZodIssue[], key: string): boolean {
+  return issues.some(
+    (i) => i.code === z.ZodIssueCode.unrecognized_keys && i.keys.includes(key),
+  );
+}
+
+describe("payloadSchema — rejects unknown fields", () => {
+  it("rejects an unknown top-level field", () => {
+    const r = parse({ hackerField: 1 });
+    expect(r.success).toBe(false);
+    expect(!r.success && hasUnrecognizedKey(r.error.issues, "hackerField")).toBe(true);
+  });
+
+  it("rejects an unknown person-level field", () => {
+    const r = parse({ people: [{ ...primary, extra: true }] });
+    expect(r.success).toBe(false);
+    expect(!r.success && hasUnrecognizedKey(r.error.issues, "extra")).toBe(true);
   });
 });

@@ -391,6 +391,25 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(await testDb.passengerCard.count()).toBe(0);
   });
 
+  it("400 when the payload has an unknown top-level field", async () => {
+    const { payload, signatures } = buildMultipartSubmission();
+    const withExtra = JSON.stringify({ ...JSON.parse(payload), hackerField: 1 });
+    const res = await postSubmission(fx.rawTokenA, withExtra, signatures);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_failed");
+    expect(await testDb.passengerCard.count()).toBe(0);
+  });
+
+  it("400 when a person in the payload has an unknown field", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      primaryOverrides: { extra: true },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_failed");
+    expect(await testDb.passengerCard.count()).toBe(0);
+  });
+
   it("400 when a signature file is missing", async () => {
     const { payload } = buildMultipartSubmission();
     // Send payload but no signature file.

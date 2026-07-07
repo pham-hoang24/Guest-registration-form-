@@ -33,18 +33,25 @@ const adultBaseObject = z.object({
 
 // Plain ZodObjects (no superRefine) so .extend() works and discriminatedUnion accepts them.
 // Adult field validation (email/phone, citizenship, residency) is done in payloadSchema.superRefine.
-const primarySchema = adultBaseObject.extend({ guestType: z.literal("primary") });
-const additionalAdultSchema = adultBaseObject.extend({ guestType: z.literal("additional_adult") });
+// .strict() rejects unknown fields at this trust boundary (CLAUDE.md: Zod at every trust boundary).
+const primarySchema = adultBaseObject.extend({ guestType: z.literal("primary") }).strict();
+const additionalAdultSchema = adultBaseObject
+  .extend({ guestType: z.literal("additional_adult") })
+  .strict();
 
-const spouseSchema = z.object({
-  guestType: z.literal("spouse"),
-  ...nameFields,
-});
+const spouseSchema = z
+  .object({
+    guestType: z.literal("spouse"),
+    ...nameFields,
+  })
+  .strict();
 
-const childSchema = z.object({
-  guestType: z.literal("child"),
-  ...nameFields,
-});
+const childSchema = z
+  .object({
+    guestType: z.literal("child"),
+    ...nameFields,
+  })
+  .strict();
 
 export const personSchema = z.discriminatedUnion("guestType", [
   primarySchema,
@@ -119,6 +126,7 @@ export const payloadSchema = z
     }),
     people: z.array(personSchema).min(1).max(21),
   })
+  .strict()
   .superRefine((data, ctx) => {
     // Departure is optional only when explicitly marked unknown. Same-day stays
     // are allowed (departure == arrival); only an earlier departure is rejected.

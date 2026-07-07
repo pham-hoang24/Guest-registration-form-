@@ -198,4 +198,53 @@ describe("passenger-card PDF download RBAC", () => {
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: "pdf_not_ready" });
   });
+
+  it("returns generic pdf_unavailable + PDF_INTEGRITY_FAILED audit on ciphertext tampering", async () => {
+    await generatePdf(cardId);
+    const record = await testDb.encryptedPdf.findFirstOrThrow({ where: { batchId: stayId } });
+    // Overwrite the stored blob so its hash no longer matches the recorded sha256Ciphertext.
+    await deps.storage.putObject({
+      path: record.blobPath,
+      contentType: "application/octet-stream",
+      body: Buffer.from("tampered-ciphertext"),
+    });
+
+    const token = await loginAs(fx.ownerA.email);
+    const res = await request(app)
+      .get(`/v1/owner/passenger-cards/${cardId}/pdf`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: "pdf_unavailable" });
+    expect(res.headers["cache-control"]).toBe("no-store");
+
+    const audit = await testDb.auditLog.findFirst({
+      where: { action: "PDF_INTEGRITY_FAILED", resourceId: cardId },
+    });
+    expect(audit).not.toBeNull();
+    expect(JSON.parse(audit!.metadataJson!)).toMatchObject({ reason: "sha256_mismatch" });
+  });
+
+  it("returns generic pdf_unavailable + PDF_DECRYPT_FAILED audit when the auth tag is invalid", async () => {
+    await generatePdf(cardId);
+    const record = await testDb.encryptedPdf.findFirstOrThrow({ where: { batchId: stayId } });
+    // Corrupt only the stored auth tag — ciphertext hash still matches, decrypt fails.
+    await testDb.encryptedPdf.update({
+      where: { id: record.id },
+      data: { authTagBase64: Buffer.alloc(16, 1).toString("base64") },
+    });
+
+    const token = await loginAs(fx.ownerA.email);
+    const res = await request(app)
+      .get(`/v1/owner/passenger-cards/${cardId}/pdf`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: "pdf_unavailable" });
+    expect(res.headers["cache-control"]).toBe("no-store");
+
+    const audit = await testDb.auditLog.findFirst({
+      where: { action: "PDF_DECRYPT_FAILED", resourceId: cardId },
+    });
+    expect(audit).not.toBeNull();
+    expect(JSON.parse(audit!.metadataJson!)).toMatchObject({ reason: "decrypt_failed" });
+  });
 });

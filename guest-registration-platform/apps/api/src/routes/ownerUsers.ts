@@ -26,7 +26,7 @@ export function ownerUserRoutes(deps: AppDeps): Router {
   const { db } = deps;
 
   // All routes require OWNER role.
-  router.use(requireRole("OWNER"));
+  router.use(requireRole(deps, "OWNER"));
 
   /** List all users in the requester's tenant. */
   router.get("/", async (req, res, next) => {
