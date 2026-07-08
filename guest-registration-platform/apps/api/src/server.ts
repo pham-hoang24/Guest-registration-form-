@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 dotenv.config();
 
-const [{ buildApp }, { configFromEnv }, { getDb }, { kmsProviderFromEnv }, storagePkg, { queueProducerFromEnv }, { generatePdfForPassengerCard }] =
+const [{ buildApp }, { configFromEnv }, { getDb }, { kmsProviderFromEnv }, storagePkg, { queueProducerFromEnv }, { generatePdfForPassengerCard }, { buildRedisRateLimitStore }] =
   await Promise.all([
     import("./app.js"),
     import("./config.js"),
@@ -14,6 +14,7 @@ const [{ buildApp }, { configFromEnv }, { getDb }, { kmsProviderFromEnv }, stora
     import("@gr/storage"),
     import("@gr/queue"),
     import("@gr/worker"),
+    import("./middleware/rateLimit.js"),
   ]);
 
 const config = configFromEnv();
@@ -27,7 +28,13 @@ const queue = await queueProducerFromEnv(process.env, {
   inProcessHandler: (msg) => generatePdfForPassengerCard(msg, { db, kms, storage, storageProviderName }),
 });
 
-const app = buildApp({ db, kms, storage, storageProviderName, queue, config });
+// Verifying the connection here means a misconfigured Redis fails startup
+// loudly instead of silently falling back to per-process rate limiting.
+const loginRateLimitStore = config.redisUrl
+  ? await buildRedisRateLimitStore(config.redisUrl, "login:")
+  : undefined;
+
+const app = buildApp({ db, kms, storage, storageProviderName, queue, config, loginRateLimitStore });
 
 app.listen(config.port, () => {
   console.log(`API listening on http://localhost:${config.port}`);

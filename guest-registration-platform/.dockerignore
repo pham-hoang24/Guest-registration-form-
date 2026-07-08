@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+apps/web/dist
+.env
+.env.local
+.local-storage
+.git
+coverage
+*.tsbuildinfo

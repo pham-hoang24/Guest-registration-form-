@@ -31,7 +31,7 @@ export function ownerAuthRoutes(deps: AppDeps): Router {
   const router = Router();
   const { db } = deps;
 
-  router.post("/login", loginRateLimit(deps.config), async (req, res, next) => {
+  router.post("/login", loginRateLimit(deps.config, deps.loginRateLimitStore), async (req, res, next) => {
     try {
       const parsed = ownerLoginRequestSchema.safeParse(req.body);
       // The same generic response for every failure mode — never reveal

@@ -69,3 +69,33 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  docker-build:
+    name: Docker build (api, worker, web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: false
+
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          # Dummy, non-secret value — CI only validates that the image builds.
+          build-args: |
+            VITE_API_BASE_URL=http://localhost:3000

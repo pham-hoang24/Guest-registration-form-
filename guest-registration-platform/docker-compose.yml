@@ -1,3 +1,6 @@
+# Local, single-instance stack for running the full app in containers.
+# dev only — every secret below is a placeholder; production must inject
+# real values via a secret manager (Azure Key Vault, etc.), never this file.
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,6 +20,92 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: guest-registration-redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: guest-registration-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/guest_registration
+      REDIS_URL: redis://redis:6379
+      # Dev-grade values (>=32 chars) — never reuse these outside local compose.
+      JWT_SECRET: dev_compose_jwt_secret_change_me_please_32
+      JWT_ISSUER: guest-registration-platform
+      JWT_AUDIENCE: owner-dashboard
+      JWT_EXPIRES_IN: 4h
+      FINGERPRINT_PEPPER: dev_compose_fingerprint_pepper_change_me_32
+      PUBLIC_APP_URL: http://localhost:8080
+      KMS_PROVIDER: local
+      LOCAL_KMS_MASTER_KEY_BASE64: N9QpW4Njskr9HIIwOH0ak+Z2zd7X1RJe5odtx8QKHsU=
+      STORAGE_PROVIDER: local
+      LOCAL_STORAGE_DIR: /app/.local-storage
+      # In-process queue: the API generates PDFs inline, no Service Bus needed
+      # for this local/single-instance stack (see the worker service below).
+      QUEUE_PROVIDER: in-process
+      RETENTION_DEFAULT_DAYS: "365"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: guest-registration-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/guest_registration
+      KMS_PROVIDER: local
+      LOCAL_KMS_MASTER_KEY_BASE64: N9QpW4Njskr9HIIwOH0ak+Z2zd7X1RJe5odtx8QKHsU=
+      STORAGE_PROVIDER: local
+      LOCAL_STORAGE_DIR: /app/.local-storage
+      RETENTION_INTERVAL_HOURS: "24"
+    # ponytail: the image's default CMD (apps/worker/Dockerfile) consumes PDF
+    # jobs from Azure Service Bus, which this local stack doesn't run — the
+    # API's QUEUE_PROVIDER=in-process already generates PDFs inline. Override
+    # the command with a retention-only loop so the container still does
+    # useful, correctly-scoped work instead of crash-looping on a missing
+    # AZURE_SERVICE_BUS_CONNECTION_STRING.
+    command: >
+      sh -c "while true; do pnpm --filter @gr/worker exec tsx src/runRetention.ts; sleep $$((RETENTION_INTERVAL_HOURS * 3600)); done"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:3000
+    container_name: guest-registration-web
+    depends_on:
+      - api
+    ports:
+      - "8080:8080"
 
 volumes:
   postgres-data:

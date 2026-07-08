@@ -1,3 +1,4 @@
+import type { Store } from "express-rate-limit";
 import type { PrismaClient } from "@gr/db";
 import type { KmsProvider } from "@gr/crypto";
 import type { StorageProvider } from "@gr/storage";
@@ -11,4 +12,6 @@ export type AppDeps = {
   storageProviderName: string;
   queue: QueueProducer;
   config: ApiConfig;
+  /** Redis-backed store for the login rate limiter, when REDIS_URL is configured. */
+  loginRateLimitStore?: Store;
 };
