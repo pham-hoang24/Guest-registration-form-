@@ -308,19 +308,32 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         return { draft, fingerprint, signatureFile: filesByField.get(draft.signatureField)! };
       });
 
-      // 8. Transactional insert with row-lock to enforce maxPassengerCards.
-      const primaryPerson = payload.people.find((p) => p.guestType === "primary")!;
-      let primaryPhone: string | undefined;
-      if ("phone" in primaryPerson && primaryPerson.phone) {
-        try {
-          primaryPhone = normalizeFinnishPhone(primaryPerson.phone);
-        } catch {
-          sendError(res, 400, "validation_failed", {
-            people: ["Primary guest phone number is invalid"],
-          });
-          return;
+      // 8. Normalize every adult's phone up front (primary + each additional adult).
+      // A phone that's present but unparseable fails the whole request — never
+      // silently dropped — and the normalized value is reused below for both the
+      // card-holder fields and the per-guest Guest.phoneE164 column. Keyed by
+      // object identity: buildPassengerCards() groups references from
+      // payload.people without cloning, so draft.people[0] is one of these keys.
+      const normalizedPhoneByPerson = new Map<(typeof payload.people)[number], string>();
+      for (const person of payload.people) {
+        if (
+          (person.guestType === "primary" || person.guestType === "additional_adult") &&
+          person.phone
+        ) {
+          try {
+            normalizedPhoneByPerson.set(person, normalizeFinnishPhone(person.phone));
+          } catch {
+            sendError(res, 400, "validation_failed", {
+              people: [`Phone number is invalid for ${person.firstName} ${person.lastName}`],
+            });
+            return;
+          }
         }
       }
+      const primaryPerson = payload.people.find((p) => p.guestType === "primary")!;
+      const primaryPhone = normalizedPhoneByPerson.get(primaryPerson);
+
+      // 9. Transactional insert with row-lock to enforce maxPassengerCards.
 
       type TxResult =
         | { kind: "exact_duplicate"; cardIds: string[] }
@@ -418,14 +431,7 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                   });
                 }
 
-                let phoneE164: string | undefined;
-                if ("phone" in person && person.phone) {
-                  try {
-                    phoneE164 = normalizeFinnishPhone(person.phone);
-                  } catch {
-                    // Non-fatal: store null if normalization fails for non-primary.
-                  }
-                }
+                const phoneE164 = normalizedPhoneByPerson.get(person);
 
                 return {
                   id: guestId,
@@ -470,15 +476,13 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
               kms: deps.kms,
             });
 
-            // Get primary guest name for the card holder.
-            const primaryGuest = draft.people.find((p) => p.guestType === "primary");
-            const cardHolderName = primaryGuest
-              ? `${primaryGuest.firstName} ${primaryGuest.lastName}`
-              : undefined;
-
-            // Country-of-entry (and its not-applicable reason) come from the card
-            // holder — the primary on the family card, the adult on their own card.
+            // Card holder — the primary on the family card, the additional adult
+            // on their own card. Also used below for country-of-entry.
             const holder = draft.people[0]!;
+            const cardHolderName = `${holder.firstName} ${holder.lastName}`;
+            const cardHolderEmail = "email" in holder ? holder.email ?? null : null;
+            const cardHolderPhoneE164 = normalizedPhoneByPerson.get(holder) ?? null;
+
             const { countryOfEntryToFinland, countryOfEntryNotApplicableReason } =
               deriveCountryOfEntry({
                 citizenship: "citizenship" in holder ? holder.citizenship : null,
@@ -500,12 +504,9 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                 countryOfEntryNotApplicableReason,
                 submissionFingerprint: fingerprint,
                 requirementVersion: REQUIREMENT_VERSION,
-                cardHolderName: cardHolderName ?? null,
-                cardHolderEmail:
-                  "email" in (primaryGuest ?? {})
-                    ? (primaryGuest as { email?: string }).email ?? null
-                    : null,
-                cardHolderPhoneE164: primaryPhone ?? null,
+                cardHolderName,
+                cardHolderEmail,
+                cardHolderPhoneE164,
                 guests: { create: guestRows },
                 signature: {
                   create: {
@@ -561,7 +562,7 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         throw err;
       }
 
-      // 9. Response + audit.
+      // 10. Response + audit.
       if (txResult.kind === "exact_duplicate") {
         await writeAudit(db, {
           tenantId: link.tenantId,

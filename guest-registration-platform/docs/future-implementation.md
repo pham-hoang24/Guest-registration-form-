@@ -75,6 +75,570 @@
  7. Distributed rate limiting note — the in-memory express-rate-limit store resets per instance; either add a Redis store or (simpler for one-instance MVP) document it
  as a known limit in docs/threat-model.md.
 
+ Status: DONE with issues to tackle:
+ ## Future production hardening notes
+
+Current container/deployment work is acceptable for a controlled MVP/demo environment, but a few items must be revisited before real production use.
+
+### 1. Remove OS metadata files from the repository
+
+`.DS_Store` files should not be committed. They do not normally contain application secrets, but they are unnecessary OS metadata and create poor repository hygiene.
+
+Future action:
+
+```bash
+git rm .DS_Store .claude/.DS_Store
+echo ".DS_Store" >> .gitignore
+echo ".DS_Store" >> guest-registration-platform/.dockerignore
+```
+
+### 2. Harden production Docker images
+
+The current API and worker images copy the full monorepo and run TypeScript via `tsx`. This is acceptable for a fast MVP container build, but it is not ideal for production.
+
+Current risk:
+
+* production image contains source code, tests, docs, and development tooling;
+* image size is larger than necessary;
+* container compromise exposes more files than needed;
+* dev/runtime boundary is weak.
+
+Future action:
+
+* use multi-stage Docker builds;
+* compile TypeScript to JavaScript;
+* install/prune production dependencies only;
+* copy only required runtime files;
+* avoid running `tsx` in production containers.
+
+Target direction:
+
+```txt
+build stage:
+  install deps
+  generate Prisma client
+  build TypeScript
+
+runtime stage:
+  copy dist/
+  copy package metadata needed by runtime
+  install/prune production deps
+  run node dist/server.js
+```
+
+### 3. Move all public registration rate limiters to Redis
+
+The login rate limiter is Redis-backed when `REDIS_URL` is configured. Public registration limiters are still in-memory per API process.
+
+Current limitation:
+
+```txt
+publicGetRateLimit
+publicPostRateLimit
+publicPostHourlyRateLimit
+```
+
+are not distributed across API replicas. If the API runs multiple instances, attackers can bypass limits by spreading traffic across replicas.
+
+Future action:
+
+* add Redis stores for public registration GET/POST/hourly limiters;
+* use separate Redis prefixes:
+
+```txt
+login:
+pub-get:
+pub-post:
+pub-post-hr:
+```
+
+* ensure raw registration tokens are never stored in Redis keys;
+* use hashed token values only.
+
+### 4. Do not expose Redis in production
+
+The local compose file exposes Redis to the host for development convenience. Production deployment should keep Redis internal-only.
+
+Dev compose is acceptable:
+
+```yaml
+ports:
+  - "6380:6379"
+```
+
+Production should avoid public/host exposure:
+
+```yaml
+expose:
+  - "6379"
+```
+
+or use a managed private Redis service.
+
+Redis must never be internet-accessible.
+
+### 5. Treat compose secrets as development-only
+
+The docker-compose file contains development placeholders such as `JWT_SECRET`, `FINGERPRINT_PEPPER`, and local KMS key material. These are acceptable only for local development.
+
+Production must inject secrets from a real secret manager, for example Azure Key Vault or the deployment platform’s secret store.
+
+Do not reuse compose values outside local development.
+
+### 6. Pin and scan container images
+
+Current images use tags such as:
+
+```txt
+node:22-alpine
+nginx:1.27-alpine
+postgres:16-alpine
+redis:7-alpine
+```
+
+This is fine for MVP development, but production should prefer stronger supply-chain controls.
+
+Future action:
+
+* pin base images by digest;
+* enable Dependabot/Renovate for Docker image updates;
+* scan images in CI;
+* fail builds on critical vulnerabilities where practical.
+
+### 7. Pin GitHub Actions more strictly
+
+The CI workflow uses version tags such as `actions/checkout@v4` and `docker/build-push-action@v6`. This is common, but stricter production hardening should pin actions by commit SHA.
+
+Also add minimum workflow permissions:
+
+```yaml
+permissions:
+  contents: read
+```
+
+### 8. Replace migrate-on-start before scaling
+
+The API container currently runs Prisma migrations on startup. This is acceptable for a single-instance MVP, but unsafe when running multiple API replicas.
+
+Current risk:
+
+```txt
+multiple API containers start
+→ each tries migration deploy
+→ race / startup instability
+```
+
+Future action:
+
+* move migrations to a one-shot deployment job;
+* start API only after migration success;
+* keep API containers stateless and migration-free.
+
+### 9. Keep nginx security headers and expand later
+
+The web container already adds basic headers:
+
+```txt
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+X-Frame-Options: DENY
+```
+
+Future action:
+
+* add a Content Security Policy after frontend asset/loading requirements stabilize;
+* keep static web assets served without exposing unnecessary nginx defaults.
+
+### Production readiness summary
+
+Current status:
+
+```txt
+Good for controlled MVP/demo:
+- non-root containers
+- .env excluded from Docker context
+- Redis-backed login limiter
+- local full-stack compose
+- basic nginx security headers
+- dev-only secrets clearly marked
+```
+
+Not production-final yet:
+
+```txt
+- full source copied into API/worker images
+- public registration limiters still in-memory
+- Redis exposed to host in local compose
+- dev secrets exist in compose
+- image digests not pinned
+- GitHub Actions not SHA-pinned
+- migrations run on API startup
+```
+
+Before real production launch, fix:
+
+```txt
+1. remove committed .DS_Store files
+2. build pruned production Docker images
+3. move all public limiters to Redis
+4. keep Redis private/internal-only
+5. use real secret manager
+6. add image scanning and digest pinning
+7. move migrations to one-shot deployment job
+```
+## Future Implementation Notes — Production Safety Polish
+
+The current MVP-RC codebase is suitable for local demo and controlled testing, but several production-hardening items remain. These are not blockers for local development, but they should be completed before real production deployment.
+
+### 1. Redis-backed public registration rate limits
+
+Current status:
+
+* Owner login rate limiting can use Redis.
+* Public guest registration rate limits are still per-process memory counters.
+* `REDIS_URL` is required in production, but not all public limiters use Redis yet.
+
+Risk:
+
+* With multiple API replicas, each process has its own counter.
+* Effective guest-link spam limits multiply by the number of running API instances.
+* Public guest links remain weaker than intended under horizontal scaling.
+
+Future fix:
+
+* Add Redis-backed stores for:
+
+  * public GET per IP + registration token
+  * public POST per IP + registration token
+  * public POST hourly per registration token
+* Keep in-memory fallback only for development and tests.
+* Verify Redis keys appear for public registration endpoints during smoke tests.
+
+Acceptance:
+
+* Production public registration limits are shared across all API replicas.
+* `NODE_ENV=production` never silently falls back to in-memory rate limits.
+* Public GET/POST/hourly limiter behavior is covered by tests or smoke checks.
+
+---
+
+### 2. Generic public registration-link unavailable response
+
+Current status:
+
+* Unknown registration tokens and unavailable links can return different public responses.
+* Example distinction:
+
+  * unknown token
+  * revoked/expired/closed real token
+
+Risk:
+
+* An attacker may infer whether a registration link exists.
+* This creates unnecessary token-enumeration signal.
+
+Future fix:
+
+* For public registration-link routes, return the same status and body for:
+
+  * unknown token
+  * revoked link
+  * expired link
+  * closed stay
+  * inactive tenant
+  * missing pre-created stay
+
+Recommended response:
+
+```json
+{
+  "error": "registration_link_unavailable"
+}
+```
+
+Use the same HTTP status for all unavailable public-token cases, preferably `404`.
+
+Acceptance:
+
+* Unknown and unavailable links are indistinguishable to the client.
+* Internal logs may record the real reason, but raw tokens must never be logged.
+
+---
+
+### 3. Fix additional-adult card holder contact fields
+
+Current status:
+
+* Passenger cards are correctly created per adult.
+* However, card-holder metadata risks being copied from the primary guest or left null for additional-adult cards.
+
+Risk:
+
+* Additional adult cards may have incorrect or missing:
+
+  * `cardHolderName`
+  * `cardHolderEmail`
+  * `cardHolderPhoneE164`
+
+Future fix:
+
+* For every `PassengerCard`, derive holder fields from `draft.people[0]`.
+* For primary family card, this is the primary guest.
+* For additional-adult card, this is the additional adult.
+
+Expected logic:
+
+```ts
+const holder = draft.people[0];
+
+cardHolderName = `${holder.firstName} ${holder.lastName}`;
+cardHolderEmail = "email" in holder ? holder.email ?? null : null;
+cardHolderPhoneE164 =
+  "phone" in holder && holder.phone
+    ? normalizeFinnishPhone(holder.phone)
+    : null;
+```
+
+Acceptance:
+
+* Additional-adult card stores that adult’s own holder name/contact.
+* Primary family card stores the primary guest’s holder name/contact.
+* Tests cover primary + spouse + child + additional adult.
+
+---
+
+### 4. Reject invalid phone numbers for every adult
+
+Current status:
+
+* Primary guest phone normalization failure returns validation error.
+* Non-primary adult phone normalization may silently store `null`.
+
+Risk:
+
+* An additional adult can pass schema validation with a phone string, then lose the phone during persistence.
+* Contact requirement becomes weaker than expected.
+
+Future fix:
+
+* Normalize all adult phone numbers before database insert.
+* If any adult phone is present but invalid, return `400 validation_failed`.
+* Do not silently drop invalid phone numbers.
+
+Acceptance:
+
+* Invalid primary phone returns `400`.
+* Invalid additional-adult phone returns `400`.
+* Valid Finnish formats normalize to E.164.
+
+---
+
+### 5. Remove route params from unauthorized-access audit metadata
+
+Current status:
+
+* Unauthorized role mismatch is audited.
+* Audit metadata may include `req.params`.
+
+Risk:
+
+* Route parameters can include resource IDs.
+* These are not necessarily PII, but they are unnecessary and increase audit-log sensitivity.
+
+Future fix:
+
+* Keep unauthorized-access audit metadata minimal:
+
+```ts
+metadata: {
+  requiredRoles: [...roles],
+  path: req.path,
+  method: req.method,
+}
+```
+
+Do not include:
+
+* `req.params`
+* query strings
+* `req.originalUrl`
+* raw tokens
+* raw IP
+* raw user agent
+
+Acceptance:
+
+* `UNAUTHORIZED_ACCESS_ATTEMPT` audit rows contain only role requirement, path, method, hashed IP, and hashed user agent.
+* No route params or query strings are stored.
+
+---
+
+### 6. Add `Cache-Control: no-store` to `/me`
+
+Current status:
+
+* Login and logout responses set `Cache-Control: no-store`.
+* The owner `/me` endpoint returns authenticated owner identity and should also be non-cacheable.
+
+Future fix:
+
+```ts
+res.setHeader("cache-control", "no-store");
+```
+
+Acceptance:
+
+* `/v1/owner/auth/me` always returns `Cache-Control: no-store`.
+
+---
+
+### 7. Clarify local Docker cookie behavior
+
+Current status:
+
+* In production mode, owner auth cookies are marked `Secure`.
+* Local Docker Compose exposes API over plain HTTP.
+* Browsers do not send `Secure` cookies over plain HTTP.
+
+Risk:
+
+* Curl smoke tests may pass, but browser-based local login can fail unless HTTPS is used or secure-cookie behavior is overridden for local development.
+
+Future fix options:
+
+1. Add a local-only override:
+
+```env
+OWNER_COOKIE_SECURE=false
+```
+
+2. Or run local compose behind an HTTPS dev proxy.
+
+Production rule:
+
+* Production must keep secure cookies enabled.
+* Never disable `Secure` cookies in real deployment.
+
+Acceptance:
+
+* Browser login works in local compose.
+* Production remains HTTPS-only for auth cookies.
+
+---
+
+### 8. Replace production `tsx` runtime with compiled Node runtime
+
+Current status:
+
+* API and worker containers run TypeScript source via `tsx`.
+* Images install full workspace dependencies.
+
+Risk:
+
+* Larger runtime image.
+* More dev tooling in production.
+* Slower cold start.
+* Larger attack surface.
+
+Future fix:
+
+* Build TypeScript during image build.
+* Run compiled JavaScript with `node`.
+* Use multi-stage Dockerfiles.
+* Prune dev dependencies or use a production deployment layout.
+
+Target shape:
+
+```dockerfile
+RUN pnpm build
+CMD ["node", "dist/server.js"]
+```
+
+Acceptance:
+
+* API and worker images run compiled JS.
+* Runtime images do not require `tsx`.
+* Runtime images contain only production dependencies where practical.
+
+---
+
+### 9. Keep local worker override out of production
+
+Current status:
+
+* The worker Dockerfile’s real command runs the Azure Service Bus consumer.
+* Local `docker-compose.yml` overrides the worker command to run retention cleanup because local compose does not include Azure Service Bus.
+* PDF generation in local compose happens inline through the API with `QUEUE_PROVIDER=in-process`.
+
+This is acceptable for local development.
+
+Production rule:
+
+* Production worker must run the real worker entrypoint.
+* Production must not use the local retention-only command override.
+* Production should use Azure Service Bus or another real queue provider.
+
+Acceptance:
+
+* Deployment docs clearly state that the compose worker override is local-only.
+* Production worker consumes PDF jobs from the queue.
+* API does not perform PDF generation inline in production unless explicitly allowed for a single-instance emergency/demo setup.
+
+---
+
+### 10. Add stricter web security headers later
+
+Current status:
+
+* Nginx sets:
+
+  * `X-Content-Type-Options`
+  * `Referrer-Policy`
+  * `X-Frame-Options`
+
+Future improvement:
+
+* Add a Content Security Policy after frontend behavior is stable.
+
+Example starting point:
+
+```nginx
+add_header Content-Security-Policy "default-src 'self'; connect-src 'self' https://api.example.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" always;
+```
+
+Acceptance:
+
+* CSP is tested against the guest form, owner dashboard, signature pad, and API calls.
+* No inline script requirements are introduced accidentally.
+
+---
+
+## Recommended Next Slice
+
+### Slice C — Production Safety Polish
+
+Implement before adding more product features:
+
+1. Redis-backed public registration rate limiters.
+2. Generic public registration-link unavailable response.
+3. Correct additional-adult card-holder metadata.
+4. Reject invalid phone numbers for every adult.
+5. Remove route params from unauthorized-access audit metadata.
+6. Add `Cache-Control: no-store` to `/me`.
+7. Clarify local Docker secure-cookie behavior.
+
+### Slice C Acceptance Criteria
+
+* Public registration rate-limit keys appear in Redis.
+* Unknown, revoked, expired, closed, and inactive links return identical public unavailable responses.
+* Additional-adult cards store the additional adult’s own holder name/contact.
+* Invalid phone numbers fail validation for every adult.
+* Unauthorized-access audit metadata contains no params, query strings, raw IPs, raw user agents, or tokens.
+* `/me` response is marked `Cache-Control: no-store`.
+* Browser login works in local compose, or local HTTPS requirement is documented clearly.
+
+
+
  Tier 3 — MVP polish (P1 items from the feature plan)
 
  8. QR code generation — owner UI: render a QR for each property's registration link (client-side qrcode lib on OwnerPropertiesPage.tsx, PNG download). Note: raw tokens
@@ -571,3 +1135,51 @@ Meaning:
 ```txt
 The local MVP flow is functionally complete and hardened enough for a controlled demo with one real property owner.
 ```
+
+---
+
+# Slice C — Production Safety Polish: Status
+
+Implemented (see `apps/api/src/middleware/rateLimit.ts`, `apps/api/src/routes/publicRegistration.ts`,
+`apps/api/src/middleware/rbac.ts`, `apps/api/src/routes/ownerAuth.ts`, `apps/api/src/config.ts`):
+
+1. **Redis-backed public rate limiters — done, and a worse bug than documented was
+   found and fixed.** The limiters weren't just per-process; `publicGetRateLimit`/
+   `publicPostRateLimit`/`publicPostHourlyRateLimit` were constructed fresh *inside
+   each request handler*, so the in-memory store never survived past the request
+   that created it — they blocked nothing, even on one instance. Fixed by building
+   each limiter once at router setup and passing a shared store (Redis-backed via
+   `pub-get:`/`pub-post:`/`pub-post-hr:` prefixes when `REDIS_URL` is set, one shared
+   in-memory store otherwise). Limiters now run before `upload.any()`.
+2. **Generic unavailable response — fixed, was not actually done.** Unknown tokens
+   previously returned a different response (`404 registration_link_not_found`) than
+   known-but-unavailable ones (`410 registration_link_unavailable`) — still a
+   token-enumeration signal. Both now return an identical `404
+   registration_link_unavailable` on GET and POST.
+3. **Additional-adult card-holder fields — fixed.** `cardHolderName/Email/PhoneE164`
+   now derive from `draft.people[0]` (the real card holder) instead of always the
+   primary guest.
+4. **Phone validation for every adult — fixed.** Every adult's phone (primary +
+   each additional adult) is normalized up front; a present-but-invalid phone fails
+   the whole request with `400 validation_failed` instead of being silently dropped
+   for non-primary adults.
+5. **RBAC audit metadata — fixed.** `UNAUTHORIZED_ACCESS_ATTEMPT` metadata no longer
+   spreads `req.params`; `requiredRoles` is an array.
+6. **`/me` cache header — fixed.** `Cache-Control: no-store` added, matching
+   `/login`/`/logout`.
+7. **`OWNER_COOKIE_SECURE` override — added, guarded.** `ownerCookieSecure = isProd
+   || env.OWNER_COOKIE_SECURE === "true"` — the env var can only opt in to secure
+   cookies outside production, never opt out of them in production. Testing the
+   *production Docker image* locally over plain HTTP (as in the Tier 1 Slice B smoke
+   test) is intentionally not unblocked by this — use an HTTPS dev proxy for that.
+
+Also done as cheap hygiene: removed the two committed `.DS_Store` files from git
+tracking and added `.DS_Store` to the root `.gitignore` and to
+`guest-registration-platform/.dockerignore`.
+
+**Not done in this slice** (infra/deployment hardening, not code correctness —
+tracked separately): Docker multi-stage builds for `api`/`worker` (only `web` has
+one), GitHub Actions SHA-pinning + `permissions: contents: read`, Redis
+host-exposure in dev compose, container image digest pinning, and moving Prisma
+`migrate deploy` off the API container's startup path before running multiple
+replicas.

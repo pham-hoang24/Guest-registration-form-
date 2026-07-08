@@ -111,6 +111,7 @@ export function ownerAuthRoutes(deps: AppDeps): Router {
 
   router.get("/me", requireOwnerAuth(deps), (req, res) => {
     const auth = req.auth!;
+    res.setHeader("cache-control", "no-store");
     res.json({
       id: auth.userId,
       email: auth.email,

@@ -184,6 +184,58 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     }
   });
 
+  it("201: additional-adult card stores that adult's own holder name/email/phone, not the primary's", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      additionalAdultCount: 1,
+      primaryOverrides: { phone: "+358401111111" },
+      additionalAdultOverrides: { phone: "0402222222" },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(201);
+
+    const cards = await testDb.passengerCard.findMany({
+      where: { guestSubmissionId: fx.stayA.id },
+      orderBy: { cardNumber: "asc" },
+    });
+    expect(cards).toHaveLength(2);
+
+    const [primaryCard, additionalCard] = cards;
+    expect(primaryCard!.cardHolderName).toBe("Anna Example");
+    expect(primaryCard!.cardHolderEmail).toBe("guest@example.com");
+    expect(primaryCard!.cardHolderPhoneE164).toBe("+358401111111");
+
+    expect(additionalCard!.cardType).toBe("ADDITIONAL_ADULT_INDIVIDUAL");
+    expect(additionalCard!.cardHolderName).toBe("Adult0 Extra");
+    expect(additionalCard!.cardHolderEmail).toBe("adult0@example.com");
+    expect(additionalCard!.cardHolderPhoneE164).toBe("+358402222222");
+    // Must not have inherited the primary's contact info.
+    expect(additionalCard!.cardHolderEmail).not.toBe(primaryCard!.cardHolderEmail);
+    expect(additionalCard!.cardHolderPhoneE164).not.toBe(primaryCard!.cardHolderPhoneE164);
+  });
+
+  it("400 validation_failed when an additional adult's phone is present but invalid", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      additionalAdultCount: 1,
+      additionalAdultOverrides: { phone: "123" },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_failed");
+    const count = await testDb.passengerCard.count({ where: { guestSubmissionId: fx.stayA.id } });
+    expect(count).toBe(0);
+  });
+
+  it("201: additional adult with no phone but a valid email still succeeds", async () => {
+    const { payload, signatures } = buildMultipartSubmission({ additionalAdultCount: 1 });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(201);
+    const additionalCard = await testDb.passengerCard.findFirst({
+      where: { guestSubmissionId: fx.stayA.id, cardType: "ADDITIONAL_ADULT_INDIVIDUAL" },
+    });
+    expect(additionalCard!.cardHolderPhoneE164).toBeNull();
+    expect(additionalCard!.cardHolderEmail).toBe("adult0@example.com");
+  });
+
   it("201: single primary guest (no additional adults)", async () => {
     const { payload, signatures } = buildMultipartSubmission();
     const res = await postSubmission(fx.rawTokenA, payload, signatures);

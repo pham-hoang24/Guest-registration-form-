@@ -176,6 +176,8 @@ export type MultipartSubmissionOptions = {
   additionalAdultCount?: number;
   /** Overrides for the primary card holder (e.g. residency / citizenship). */
   primaryOverrides?: Record<string, unknown>;
+  /** Overrides applied to every additional adult (e.g. phone). */
+  additionalAdultOverrides?: Record<string, unknown>;
 };
 
 /**
@@ -190,6 +192,7 @@ export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) 
     purposeOfStay = "Leisure",
     additionalAdultCount = 0,
     primaryOverrides = {},
+    additionalAdultOverrides = {},
   } = opts;
   // Distinguish "not passed" (default date) from an explicit `undefined` (omit it),
   // so callers can build a departureDateKnown:true payload with no date.
@@ -224,6 +227,7 @@ export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) 
       documentType: "passport",
       documentNumber: `Y000000${i}`,
       email: `adult${i}@example.com`,
+      ...additionalAdultOverrides,
     });
   }
 

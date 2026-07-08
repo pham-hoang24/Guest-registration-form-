@@ -163,7 +163,14 @@ describe("passenger-card PDF download RBAC", () => {
       where: { action: "UNAUTHORIZED_ACCESS_ATTEMPT", actorId: fx.viewerA.id },
     });
     expect(denied).not.toBeNull();
-    expect(denied!.metadataJson).toContain(cardId);
+    // Metadata is exactly these 3 keys — no route-param spread (e.g. no bare
+    // `passengerCardId` key; the id only appears inside `path`, same as any route).
+    const metadata = JSON.parse(denied!.metadataJson!);
+    expect(metadata).toEqual({
+      requiredRoles: ["OWNER", "MANAGER"],
+      path: `/${cardId}/pdf`,
+      method: "GET",
+    });
   });
 
   it.each(["ownerA", "managerA"] as const)(

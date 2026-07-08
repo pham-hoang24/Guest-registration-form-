@@ -12,7 +12,7 @@ export type AuditEntry = {
   /** Must already be a hash — never pass a raw user agent. */
   userAgentHash?: string | null;
   /** Must not contain PII (names, emails, document numbers, addresses). */
-  metadata?: Record<string, string | number | boolean> | null;
+  metadata?: Record<string, string | number | boolean | readonly string[]> | null;
 };
 
 /**

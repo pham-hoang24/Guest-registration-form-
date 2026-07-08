@@ -53,6 +53,18 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ? env.ALLOW_BEARER_OWNER_AUTH === "true"
     : !isProd;
 
+  if (
+    env.OWNER_COOKIE_SECURE !== undefined &&
+    env.OWNER_COOKIE_SECURE !== "true" &&
+    env.OWNER_COOKIE_SECURE !== "false"
+  ) {
+    throw new Error('OWNER_COOKIE_SECURE must be "true" or "false"');
+  }
+  // In production the cookie is always secure — the env var can only opt in to
+  // secure=true outside production (e.g. an HTTPS-fronted staging box), never
+  // opt out of secure=true in production.
+  const ownerCookieSecure = isProd || env.OWNER_COOKIE_SECURE === "true";
+
   const rawTrustProxy = env.TRUST_PROXY;
   let trustProxy: number | boolean = false;
   if (rawTrustProxy === "1") trustProxy = 1;
@@ -67,7 +79,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ownerJwksUri,
     allowBearerOwnerAuth,
     ownerAuthCookieName: env.OWNER_COOKIE_NAME ?? "gr_owner_session",
-    ownerCookieSecure: isProd,
+    ownerCookieSecure,
     publicAppUrl: env.PUBLIC_APP_URL ?? "http://localhost:5173",
     retentionDefaultDays: Number(env.RETENTION_DEFAULT_DAYS ?? 365),
     retentionGraceDays: 30,

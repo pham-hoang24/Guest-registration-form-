@@ -7,3 +7,5 @@ apps/web/dist
 .git
 coverage
 *.tsbuildinfo
+.DS_Store
+**/.DS_Store
