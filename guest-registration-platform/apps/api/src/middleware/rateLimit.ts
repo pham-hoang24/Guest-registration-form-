@@ -1,5 +1,5 @@
-import rateLimit, { type Store } from "express-rate-limit";
-import type { RequestHandler } from "express";
+import rateLimit, { ipKeyGenerator, type Store } from "express-rate-limit";
+import type { Request, RequestHandler } from "express";
 import { hashRegistrationToken } from "@gr/crypto";
 import type { ApiConfig } from "../config.js";
 
@@ -8,6 +8,14 @@ const MAX_TOKEN_LENGTH_FOR_KEY = 512;
 function hashTokenParam(req: { params: Record<string, string> }): string {
   const rawToken = typeof req.params.token === "string" ? req.params.token : "";
   return hashRegistrationToken(rawToken.slice(0, MAX_TOKEN_LENGTH_FOR_KEY));
+}
+
+/**
+ * IPv6-safe key: privacy-extension addresses rotate within a /64, so
+ * ipKeyGenerator normalizes to the subnet instead of the raw address.
+ */
+function ipKeyFromRequest(req: Request): string {
+  return ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? "0.0.0.0");
 }
 
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
@@ -79,7 +87,7 @@ export function publicGetRateLimit(config: ApiConfig, store?: Store): RequestHan
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "too_many_requests" },
-    keyGenerator: (req) => `${req.ip ?? "unknown"}:${hashTokenParam(req)}`,
+    keyGenerator: (req) => `${ipKeyFromRequest(req)}:${hashTokenParam(req)}`,
     ...(store ? { store } : {}),
   });
 }
@@ -96,7 +104,7 @@ export function publicPostRateLimit(config: ApiConfig, store?: Store): RequestHa
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "too_many_requests" },
-    keyGenerator: (req) => `${req.ip ?? "unknown"}:${hashTokenParam(req)}`,
+    keyGenerator: (req) => `${ipKeyFromRequest(req)}:${hashTokenParam(req)}`,
     ...(store ? { store } : {}),
   });
 }

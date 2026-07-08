@@ -163,14 +163,15 @@ describe("passenger-card PDF download RBAC", () => {
       where: { action: "UNAUTHORIZED_ACCESS_ATTEMPT", actorId: fx.viewerA.id },
     });
     expect(denied).not.toBeNull();
-    // Metadata is exactly these 3 keys — no route-param spread (e.g. no bare
-    // `passengerCardId` key; the id only appears inside `path`, same as any route).
+    // Metadata must never contain the resource ID — audit rows are queryable
+    // and shouldn't leak into a free-text field what tenant isolation already gates.
     const metadata = JSON.parse(denied!.metadataJson!);
     expect(metadata).toEqual({
       requiredRoles: ["OWNER", "MANAGER"],
-      path: `/${cardId}/pdf`,
+      route: "/v1/owner/passenger-cards",
       method: "GET",
     });
+    expect(denied!.metadataJson).not.toContain(cardId);
   });
 
   it.each(["ownerA", "managerA"] as const)(

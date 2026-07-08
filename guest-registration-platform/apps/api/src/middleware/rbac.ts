@@ -5,6 +5,11 @@ import type { AppDeps } from "../deps.js";
 import { sendError } from "../lib/httpErrors.js";
 import { auditMetaFromRequest } from "../lib/requestMeta.js";
 
+/** Router mount path only — never req.path/originalUrl/params, which carry the matched resource id. */
+function auditRouteLabel(req: Request): string {
+  return req.baseUrl || "owner_route";
+}
+
 /** Must run after requireOwnerAuth. Denies with 403 (never 404) on role mismatch. */
 export function requireRole(deps: AppDeps, ...roles: readonly OwnerRoleName[]): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -20,8 +25,8 @@ export function requireRole(deps: AppDeps, ...roles: readonly OwnerRoleName[]): 
           actorId: req.auth.userId,
           tenantId: req.auth.tenantId,
           resourceType: "OwnerRoute",
-          // ponytail: owner API rate limit bounds spam; per-actor/path dedupe is a later item.
-          metadata: { requiredRoles: [...roles], path: req.path, method: req.method },
+          // ponytail: owner API rate limit bounds spam; per-actor/route dedupe is a later item.
+          metadata: { requiredRoles: [...roles], route: auditRouteLabel(req), method: req.method },
           ...auditMetaFromRequest(req),
         });
       } catch {
