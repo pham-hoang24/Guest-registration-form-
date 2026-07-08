@@ -30,11 +30,30 @@ const queue = await queueProducerFromEnv(process.env, {
 
 // Verifying the connection here means a misconfigured Redis fails startup
 // loudly instead of silently falling back to per-process rate limiting.
-const loginRateLimitStore = config.redisUrl
-  ? await buildRedisRateLimitStore(config.redisUrl, "login:")
-  : undefined;
+const [loginRateLimitStore, publicGetRateLimitStore, publicPostRateLimitStore, publicPostHourlyRateLimitStore] =
+  config.redisUrl
+    ? await Promise.all([
+        buildRedisRateLimitStore(config.redisUrl, "login:"),
+        buildRedisRateLimitStore(config.redisUrl, "pub-get:"),
+        buildRedisRateLimitStore(config.redisUrl, "pub-post:"),
+        buildRedisRateLimitStore(config.redisUrl, "pub-post-hr:"),
+      ])
+    : [undefined, undefined, undefined, undefined];
 
-const app = buildApp({ db, kms, storage, storageProviderName, queue, config, loginRateLimitStore });
+const app = buildApp({
+  db,
+  kms,
+  storage,
+  storageProviderName,
+  queue,
+  config,
+  loginRateLimitStore,
+  publicRateLimitStores: {
+    get: publicGetRateLimitStore,
+    postMinute: publicPostRateLimitStore,
+    postHourly: publicPostHourlyRateLimitStore,
+  },
+});
 
 app.listen(config.port, () => {
   console.log(`API listening on http://localhost:${config.port}`);

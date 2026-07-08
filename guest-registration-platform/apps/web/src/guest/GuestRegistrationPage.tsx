@@ -124,7 +124,7 @@ export default function GuestRegistrationPage() {
       setState({ kind: "success" });
     } catch (error) {
       const message =
-        error instanceof ApiError && error.status === 410
+        error instanceof ApiError && error.status === 404
           ? t("status.errorLinkExpired")
           : t("status.errorGeneric");
       setState({ kind: "error", info, message });

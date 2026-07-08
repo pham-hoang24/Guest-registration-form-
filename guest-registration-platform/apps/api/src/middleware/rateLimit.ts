@@ -1,6 +1,14 @@
 import rateLimit, { type Store } from "express-rate-limit";
 import type { RequestHandler } from "express";
+import { hashRegistrationToken } from "@gr/crypto";
 import type { ApiConfig } from "../config.js";
+
+const MAX_TOKEN_LENGTH_FOR_KEY = 512;
+
+function hashTokenParam(req: { params: Record<string, string> }): string {
+  const rawToken = typeof req.params.token === "string" ? req.params.token : "";
+  return hashRegistrationToken(rawToken.slice(0, MAX_TOKEN_LENGTH_FOR_KEY));
+}
 
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
 const ONE_HOUR = 60 * 60 * 1000;
@@ -59,9 +67,11 @@ export function loginRateLimit(config: ApiConfig, store?: Store): RequestHandler
 /**
  * Per-IP+token GET rate limit: 60 requests/minute.
  * Uses hashed token in the key so one token's traffic doesn't bleed into another.
- * Per-process (in-memory) for now — see docs/threat-model.md.
+ * Built once per router (not per request) so the store — in-memory or Redis —
+ * actually accumulates counts across requests. Distributed via Redis when `store`
+ * is provided (see `buildRedisRateLimitStore`).
  */
-export function publicGetRateLimit(config: ApiConfig, hashedToken: string): RequestHandler {
+export function publicGetRateLimit(config: ApiConfig, store?: Store): RequestHandler {
   if (!config.rateLimitEnabled) return noop();
   return rateLimit({
     windowMs: ONE_MINUTE,
@@ -69,15 +79,16 @@ export function publicGetRateLimit(config: ApiConfig, hashedToken: string): Requ
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "too_many_requests" },
-    keyGenerator: (req) => `${req.ip ?? "unknown"}:${hashedToken}`,
+    keyGenerator: (req) => `${req.ip ?? "unknown"}:${hashTokenParam(req)}`,
+    ...(store ? { store } : {}),
   });
 }
 
 /**
  * Per-IP+token POST rate limit: 5 requests/minute.
- * Per-process (in-memory) for now — see docs/threat-model.md.
+ * Built once per router — see `publicGetRateLimit` doc comment.
  */
-export function publicPostRateLimit(config: ApiConfig, hashedToken: string): RequestHandler {
+export function publicPostRateLimit(config: ApiConfig, store?: Store): RequestHandler {
   if (!config.rateLimitEnabled) return noop();
   return rateLimit({
     windowMs: ONE_MINUTE,
@@ -85,19 +96,17 @@ export function publicPostRateLimit(config: ApiConfig, hashedToken: string): Req
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "too_many_requests" },
-    keyGenerator: (req) => `${req.ip ?? "unknown"}:${hashedToken}`,
+    keyGenerator: (req) => `${req.ip ?? "unknown"}:${hashTokenParam(req)}`,
+    ...(store ? { store } : {}),
   });
 }
 
 /**
  * Per-token hourly POST rate limit: 20 requests/hour (across all IPs).
  * Primary defense against one link being spammed across rotating IPs.
- * Per-process (in-memory) for now — see docs/threat-model.md.
+ * Built once per router — see `publicGetRateLimit` doc comment.
  */
-export function publicPostHourlyRateLimit(
-  config: ApiConfig,
-  hashedToken: string,
-): RequestHandler {
+export function publicPostHourlyRateLimit(config: ApiConfig, store?: Store): RequestHandler {
   if (!config.rateLimitEnabled) return noop();
   return rateLimit({
     windowMs: ONE_HOUR,
@@ -105,7 +114,8 @@ export function publicPostHourlyRateLimit(
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "too_many_requests" },
-    keyGenerator: () => hashedToken,
+    keyGenerator: (req) => hashTokenParam(req),
+    ...(store ? { store } : {}),
   });
 }
 

@@ -14,4 +14,10 @@ export type AppDeps = {
   config: ApiConfig;
   /** Redis-backed store for the login rate limiter, when REDIS_URL is configured. */
   loginRateLimitStore?: Store;
+  /** Redis-backed stores for the public registration-link rate limiters, when REDIS_URL is configured. */
+  publicRateLimitStores?: {
+    get?: Store;
+    postMinute?: Store;
+    postHourly?: Store;
+  };
 };

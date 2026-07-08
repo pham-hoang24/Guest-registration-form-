@@ -117,65 +117,59 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
     },
   });
 
-  router.get("/registration-links/:token", async (req, res, next) => {
+  // Built once per router so the underlying store — in-memory or Redis —
+  // actually accumulates counts across requests (see rateLimit.ts doc comments).
+  const publicGetLimiter = publicGetRateLimit(config, deps.publicRateLimitStores?.get);
+  const publicPostLimiter = publicPostRateLimit(config, deps.publicRateLimitStores?.postMinute);
+  const publicPostHourlyLimiter = publicPostHourlyRateLimit(
+    config,
+    deps.publicRateLimitStores?.postHourly,
+  );
+
+  router.get("/registration-links/:token", publicGetLimiter, async (req, res, next) => {
     const rawToken = req.params.token;
-    const hashedToken = hashRegistrationToken(rawToken ?? "");
-    const limiter = publicGetRateLimit(config, hashedToken);
-
-    limiter(req, res, async () => {
-      try {
-        const resolved = await resolveActiveLink(db, rawToken);
-        if (resolved.kind === "not_found") {
-          sendError(res, 404, "registration_link_not_found");
-          return;
-        }
-        if (resolved.kind === "unavailable") {
-          sendError(res, 410, "registration_link_unavailable");
-          return;
-        }
-        const { link } = resolved;
-
-        // Lightweight structured log only — not an audit table row.
-        console.log(
-          JSON.stringify({
-            level: "info",
-            event: "registration_link_opened",
-            requestId: req.requestId,
-            tenantId: link.tenantId,
-            propertyId: link.propertyId,
-          }),
-        );
-
-        res.json({
-          propertyName: link.property.name,
-          propertyCity: link.property.city,
-          requirementVersion: REQUIREMENT_VERSION,
-          supportedLanguages: SUPPORTED_LANGUAGES,
-        });
-      } catch (error) {
-        next(error);
+    try {
+      const resolved = await resolveActiveLink(db, rawToken);
+      // Public capability URL: collapse unknown/revoked/expired/closed into one
+      // response so token existence is never confirmable.
+      if (resolved.kind === "not_found" || resolved.kind === "unavailable") {
+        sendError(res, 404, "registration_link_unavailable");
+        return;
       }
-    });
+      const { link } = resolved;
+
+      // Lightweight structured log only — not an audit table row.
+      console.log(
+        JSON.stringify({
+          level: "info",
+          event: "registration_link_opened",
+          requestId: req.requestId,
+          tenantId: link.tenantId,
+          propertyId: link.propertyId,
+        }),
+      );
+
+      res.json({
+        propertyName: link.property.name,
+        propertyCity: link.property.city,
+        requirementVersion: REQUIREMENT_VERSION,
+        supportedLanguages: SUPPORTED_LANGUAGES,
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
+  // Rate limiters run before multer so spammed requests are rejected before
+  // the server spends work parsing multipart signature files.
   router.post(
     "/registration-links/:token/submissions",
+    publicPostLimiter,
+    publicPostHourlyLimiter,
     upload.any(),
     async (req, res, next) => {
       const rawToken = req.params.token;
-      const hashedToken = hashRegistrationToken(rawToken ?? "");
-
-      // Apply per-IP+token and per-token hourly limits.
-      const minuteLimiter = publicPostRateLimit(config, hashedToken);
-      const hourlyLimiter = publicPostHourlyRateLimit(config, hashedToken);
-
-      minuteLimiter(req, res, (minuteErr) => {
-        if (minuteErr) return next(minuteErr);
-        hourlyLimiter(req, res, (hourlyErr) => {
-          if (hourlyErr) return next(hourlyErr);
-          handleSubmit(req, res, next, rawToken);
-        });
-      });
+      await handleSubmit(req, res, next, rawToken);
     },
   );
 
@@ -188,12 +182,10 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
     try {
       // 1. Resolve link + stay.
       const resolved = await resolveActiveLink(db, rawToken);
-      if (resolved.kind === "not_found") {
-        sendError(res, 404, "registration_link_not_found");
-        return;
-      }
-      if (resolved.kind === "unavailable") {
-        sendError(res, 410, "registration_link_unavailable");
+      // Public capability URL: collapse unknown/revoked/expired/closed into one
+      // response so token existence is never confirmable.
+      if (resolved.kind === "not_found" || resolved.kind === "unavailable") {
+        sendError(res, 404, "registration_link_unavailable");
         return;
       }
       const { link, stay } = resolved;

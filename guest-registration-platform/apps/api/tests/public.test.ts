@@ -56,39 +56,42 @@ describe("GET /v1/public/registration-links/:token", () => {
     expect(JSON.stringify(res.body)).not.toContain(fx.propertyA.id);
   });
 
-  it("returns 404 registration_link_not_found for an unknown token", async () => {
+  it("returns 404 registration_link_unavailable for an unknown token", async () => {
     const res = await request(app).get("/v1/public/registration-links/not-a-real-token");
     expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "registration_link_not_found" });
+    expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
-  it("returns 410 for a revoked link", async () => {
+  it("returns the identical 404 response for a revoked link as for an unknown token", async () => {
     await testDb.registrationLink.update({
       where: { id: fx.linkA.id },
       data: { status: "REVOKED" },
     });
-    const res = await request(app).get(`/v1/public/registration-links/${fx.rawTokenA}`);
-    expect(res.status).toBe(410);
-    expect(res.body).toEqual({ error: "registration_link_unavailable" });
+    const unknown = await request(app).get("/v1/public/registration-links/not-a-real-token");
+    const revoked = await request(app).get(`/v1/public/registration-links/${fx.rawTokenA}`);
+    expect(revoked.status).toBe(unknown.status);
+    expect(revoked.body).toEqual(unknown.body);
+    expect(revoked.status).toBe(404);
+    expect(revoked.body).toEqual({ error: "registration_link_unavailable" });
   });
 
-  it("returns 410 for an expired link", async () => {
+  it("returns 404 registration_link_unavailable for an expired link", async () => {
     await testDb.registrationLink.update({
       where: { id: fx.linkA.id },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
     const res = await request(app).get(`/v1/public/registration-links/${fx.rawTokenA}`);
-    expect(res.status).toBe(410);
+    expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
-  it("returns 410 when stay is CLOSED", async () => {
+  it("returns 404 registration_link_unavailable when stay is CLOSED", async () => {
     await testDb.guestSubmission.update({
       where: { id: fx.stayA.id },
       data: { status: "CLOSED" },
     });
     const res = await request(app).get(`/v1/public/registration-links/${fx.rawTokenA}`);
-    expect(res.status).toBe(410);
+    expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 });
@@ -233,44 +236,41 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(await testDb.passengerCard.count({ where: { guestSubmissionId: fx.stayA.id } })).toBe(0);
   });
 
-  it("404 registration_link_not_found for unknown token", async () => {
+  it("404 registration_link_unavailable for unknown token, identical to a revoked link", async () => {
     const { payload, signatures } = buildMultipartSubmission();
-    const res = await postSubmission("bogus-token", payload, signatures);
-    expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "registration_link_not_found" });
+    const unknown = await postSubmission("bogus-token", payload, signatures);
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toEqual({ error: "registration_link_unavailable" });
     expect(await testDb.passengerCard.count()).toBe(0);
-  });
 
-  it("410 registration_link_unavailable for revoked link", async () => {
     await testDb.registrationLink.update({
       where: { id: fx.linkA.id },
       data: { status: "REVOKED" },
     });
-    const { payload, signatures } = buildMultipartSubmission();
-    const res = await postSubmission(fx.rawTokenA, payload, signatures);
-    expect(res.status).toBe(410);
-    expect(res.body).toEqual({ error: "registration_link_unavailable" });
+    const revoked = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(revoked.status).toBe(unknown.status);
+    expect(revoked.body).toEqual(unknown.body);
   });
 
-  it("410 registration_link_unavailable for expired link", async () => {
+  it("404 registration_link_unavailable for expired link", async () => {
     await testDb.registrationLink.update({
       where: { id: fx.linkA.id },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
     const { payload, signatures } = buildMultipartSubmission();
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
-    expect(res.status).toBe(410);
+    expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
-  it("410 registration_link_unavailable when stay is CLOSED", async () => {
+  it("404 registration_link_unavailable when stay is CLOSED", async () => {
     await testDb.guestSubmission.update({
       where: { id: fx.stayA.id },
       data: { status: "CLOSED" },
     });
     const { payload, signatures } = buildMultipartSubmission();
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
-    expect(res.status).toBe(410);
+    expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: "registration_link_unavailable" });
   });
 
