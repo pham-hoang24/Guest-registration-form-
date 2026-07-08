@@ -4,6 +4,13 @@ export type ApiConfig = {
   jwtIssuer: string;
   jwtAudience: string;
   jwtExpiresIn: string;
+  /** When set, owner tokens are verified via RS256/JWKS instead of HS256. Must be https. */
+  ownerJwksUri: string | undefined;
+  /** Whether the Authorization: Bearer header is accepted for owner auth (cookie is always accepted). */
+  allowBearerOwnerAuth: boolean;
+  ownerAuthCookieName: string;
+  /** Sets the `secure` attribute on the owner session cookie. */
+  ownerCookieSecure: boolean;
   publicAppUrl: string;
   retentionDefaultDays: number;
   /** Grace period between retainUntil and hard deletion. */
@@ -39,6 +46,13 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     throw new Error("REDIS_URL is required in production for distributed rate limiting");
   }
 
+  const ownerJwksUri = env.OWNER_JWKS_URI;
+
+  const isProd = env.NODE_ENV === "production";
+  const allowBearerOwnerAuth = env.ALLOW_BEARER_OWNER_AUTH
+    ? env.ALLOW_BEARER_OWNER_AUTH === "true"
+    : !isProd;
+
   const rawTrustProxy = env.TRUST_PROXY;
   let trustProxy: number | boolean = false;
   if (rawTrustProxy === "1") trustProxy = 1;
@@ -49,7 +63,11 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     jwtSecret,
     jwtIssuer: env.JWT_ISSUER ?? "guest-registration-platform",
     jwtAudience: env.JWT_AUDIENCE ?? "owner-dashboard",
-    jwtExpiresIn: "12h",
+    jwtExpiresIn: env.JWT_EXPIRES_IN ?? "4h",
+    ownerJwksUri,
+    allowBearerOwnerAuth,
+    ownerAuthCookieName: env.OWNER_COOKIE_NAME ?? "gr_owner_session",
+    ownerCookieSecure: isProd,
     publicAppUrl: env.PUBLIC_APP_URL ?? "http://localhost:5173",
     retentionDefaultDays: Number(env.RETENTION_DEFAULT_DAYS ?? 365),
     retentionGraceDays: 30,

@@ -1,5 +1,14 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Navigate } from "react-router-dom";
+import { apiGet, apiAction } from "../api/client.js";
 
 type OwnerUser = {
   id: string;
@@ -9,42 +18,38 @@ type OwnerUser = {
 };
 
 type OwnerAuthState = {
-  token: string | null;
   user: OwnerUser | null;
-  login: (token: string, user: OwnerUser) => void;
+  /** Undefined until the initial session check (GET /me) resolves. */
+  ready: boolean;
+  login: (user: OwnerUser) => void;
   logout: () => void;
 };
 
-const STORAGE_KEY = "gr.owner.session";
-
 const OwnerAuthContext = createContext<OwnerAuthState | null>(null);
 
-function loadSession(): { token: string; user: OwnerUser } | null {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as { token: string; user: OwnerUser }) : null;
-  } catch {
-    return null;
-  }
-}
-
 export function OwnerAuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState(loadSession);
+  const [user, setUser] = useState<OwnerUser | null>(null);
+  const [ready, setReady] = useState(false);
 
-  const login = useCallback((token: string, user: OwnerUser) => {
-    const next = { token, user };
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setSession(next);
+  useEffect(() => {
+    apiGet<OwnerUser>("/v1/owner/auth/me")
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setReady(true));
+  }, []);
+
+  const login = useCallback((nextUser: OwnerUser) => {
+    setUser(nextUser);
   }, []);
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem(STORAGE_KEY);
-    setSession(null);
+    apiAction("/v1/owner/auth/logout").catch(() => undefined);
+    setUser(null);
   }, []);
 
   const value = useMemo<OwnerAuthState>(
-    () => ({ token: session?.token ?? null, user: session?.user ?? null, login, logout }),
-    [session, login, logout],
+    () => ({ user, ready, login, logout }),
+    [user, ready, login, logout],
   );
 
   return <OwnerAuthContext.Provider value={value}>{children}</OwnerAuthContext.Provider>;
@@ -57,7 +62,8 @@ export function useOwnerAuth(): OwnerAuthState {
 }
 
 export function RequireOwnerAuth({ children }: { children: ReactNode }) {
-  const { token } = useOwnerAuth();
-  if (!token) return <Navigate to="/owner/login" replace />;
+  const { user, ready } = useOwnerAuth();
+  if (!ready) return null;
+  if (!user) return <Navigate to="/owner/login" replace />;
   return <>{children}</>;
 }

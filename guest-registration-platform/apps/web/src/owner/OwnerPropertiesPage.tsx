@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiGet } from "../api/client.js";
-import { useOwnerAuth } from "./OwnerAuthContext.js";
 import OwnerLayout from "./OwnerLayout.js";
 
 type Property = {
@@ -13,15 +12,14 @@ type Property = {
 };
 
 export default function OwnerPropertiesPage() {
-  const { token } = useOwnerAuth();
   const [properties, setProperties] = useState<Property[] | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    apiGet<{ properties: Property[] }>("/v1/owner/properties", token!)
+    apiGet<{ properties: Property[] }>("/v1/owner/properties")
       .then((data) => setProperties(data.properties))
       .catch(() => setError(true));
-  }, [token]);
+  }, []);
 
   return (
     <OwnerLayout title="Properties">

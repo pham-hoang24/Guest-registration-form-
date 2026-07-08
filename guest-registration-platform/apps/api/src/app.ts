@@ -27,7 +27,7 @@ export function buildApp(deps: AppDeps): Express {
   app.use(requestId);
   app.use(requestLog);
   app.use(helmet());
-  app.use(cors({ origin: deps.config.publicAppUrl }));
+  app.use(cors({ origin: deps.config.publicAppUrl, credentials: true }));
   // express.json only processes requests with application/json content-type;
   // multipart/form-data requests are handled by multer in the individual routes.
   app.use(express.json({ limit: "200kb" }));

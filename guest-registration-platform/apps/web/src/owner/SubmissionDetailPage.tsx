@@ -49,16 +49,16 @@ type SubmissionDetail = {
 
 export default function SubmissionDetailPage() {
   const { submissionId } = useParams<{ submissionId: string }>();
-  const { token, user } = useOwnerAuth();
+  const { user } = useOwnerAuth();
   const [detail, setDetail] = useState<SubmissionDetail | null>(null);
   const [error, setError] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiGet<SubmissionDetail>(`/v1/owner/submissions/${submissionId}`, token!)
+    apiGet<SubmissionDetail>(`/v1/owner/submissions/${submissionId}`)
       .then(setDetail)
       .catch(() => setError(true));
-  }, [submissionId, token]);
+  }, [submissionId]);
 
   const canDownload = user?.role === "OWNER" || user?.role === "MANAGER";
 
@@ -124,7 +124,7 @@ export default function SubmissionDetailPage() {
                 {card.pdfAvailable && canDownload ? (
                   <button
                     onClick={() =>
-                      downloadCardPdf(card.id, token!).catch(() =>
+                      downloadCardPdf(card.id).catch(() =>
                         setDownloadError("Download failed."),
                       )
                     }

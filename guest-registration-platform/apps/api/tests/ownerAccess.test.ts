@@ -4,6 +4,7 @@ import { generatePdfForPassengerCard } from "@gr/worker";
 import {
   buildMultipartSubmission,
   buildTestApp,
+  extractSessionCookie,
   seedFixtures,
   testDb,
   truncateAll,
@@ -40,7 +41,7 @@ async function loginAs(email: string): Promise<string> {
     .post("/v1/owner/auth/login")
     .send({ email, password: fx.password });
   expect(res.status).toBe(200);
-  return res.body.token as string;
+  return extractSessionCookie(res);
 }
 
 beforeEach(async () => {
@@ -157,6 +158,12 @@ describe("passenger-card PDF download RBAC", () => {
       where: { action: "OWNER_DOWNLOADED_PDF" },
     });
     expect(downloads).toBe(0);
+
+    const denied = await testDb.auditLog.findFirst({
+      where: { action: "UNAUTHORIZED_ACCESS_ATTEMPT", actorId: fx.viewerA.id },
+    });
+    expect(denied).not.toBeNull();
+    expect(denied!.metadataJson).toContain(cardId);
   });
 
   it.each(["ownerA", "managerA"] as const)(

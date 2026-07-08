@@ -20,44 +20,38 @@ async function parseError(response: Response): Promise<never> {
   throw new ApiError(response.status, code);
 }
 
-export async function apiGet<T>(path: string, token?: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: token ? { authorization: `Bearer ${token}` } : {},
-  });
+export async function apiGet<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, { credentials: "include" });
   if (!response.ok) await parseError(response);
   return response.json() as Promise<T>;
 }
 
-export async function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {
+export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
+    credentials: "include",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!response.ok) await parseError(response);
   return response.json() as Promise<T>;
 }
 
-export async function apiPatch<T>(path: string, body: unknown, token?: string): Promise<T> {
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "PATCH",
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
+    credentials: "include",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!response.ok) await parseError(response);
   return response.json() as Promise<T>;
 }
 
-export async function apiAction(path: string, token?: string): Promise<void> {
+export async function apiAction(path: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers: token ? { authorization: `Bearer ${token}` } : {},
+    credentials: "include",
   });
   if (!response.ok) await parseError(response);
 }
@@ -73,10 +67,10 @@ export async function apiPostMultipart<T>(path: string, form: FormData): Promise
 }
 
 /** Fetches a decrypted passenger-card PDF and triggers a browser download. */
-export async function downloadCardPdf(passengerCardId: string, token: string): Promise<void> {
+export async function downloadCardPdf(passengerCardId: string): Promise<void> {
   const response = await fetch(
     `${API_BASE_URL}/v1/owner/passenger-cards/${passengerCardId}/pdf`,
-    { headers: { authorization: `Bearer ${token}` } },
+    { credentials: "include" },
   );
   if (!response.ok) await parseError(response);
   const blob = await response.blob();

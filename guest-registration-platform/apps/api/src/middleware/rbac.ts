@@ -21,7 +21,7 @@ export function requireRole(deps: AppDeps, ...roles: readonly OwnerRoleName[]): 
           tenantId: req.auth.tenantId,
           resourceType: "OwnerRoute",
           // ponytail: owner API rate limit bounds spam; per-actor/path dedupe is a later item.
-          metadata: { requiredRoles: roles.join(","), path: req.path, method: req.method },
+          metadata: { ...req.params, requiredRoles: roles.join(","), path: req.path, method: req.method },
           ...auditMetaFromRequest(req),
         });
       } catch {

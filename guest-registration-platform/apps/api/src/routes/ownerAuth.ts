@@ -8,6 +8,25 @@ import { auditMetaFromRequest } from "../lib/requestMeta.js";
 import { requireOwnerAuth, signOwnerToken } from "../middleware/auth.js";
 import { loginRateLimit } from "../middleware/rateLimit.js";
 
+/** Parses "4h" / "30m" / "1d" / "90s" — the small set of formats this config value uses. */
+function expiresInToMs(expiresIn: string): number {
+  const match = /^(\d+)(s|m|h|d)$/.exec(expiresIn);
+  if (!match) throw new Error(`Unsupported jwtExpiresIn format: ${expiresIn}`);
+  const value = Number(match[1]);
+  const unitMs = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 }[match[2] as string]!;
+  return value * unitMs;
+}
+
+function setSessionCookie(res: import("express").Response, deps: AppDeps, token: string): void {
+  res.cookie(deps.config.ownerAuthCookieName, token, {
+    httpOnly: true,
+    secure: deps.config.ownerCookieSecure,
+    sameSite: "strict",
+    path: "/",
+    maxAge: expiresInToMs(deps.config.jwtExpiresIn),
+  });
+}
+
 export function ownerAuthRoutes(deps: AppDeps): Router {
   const router = Router();
   const { db } = deps;
@@ -70,13 +89,24 @@ export function ownerAuthRoutes(deps: AppDeps): Router {
         ...auditMetaFromRequest(req),
       });
 
+      setSessionCookie(res, deps, token);
+      res.setHeader("cache-control", "no-store");
       res.json({
-        token,
         user: { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId },
       });
     } catch (error) {
       next(error);
     }
+  });
+
+  router.post("/logout", (_req, res) => {
+    res.clearCookie(deps.config.ownerAuthCookieName, {
+      path: "/",
+      sameSite: "strict",
+      secure: deps.config.ownerCookieSecure,
+    });
+    res.setHeader("cache-control", "no-store");
+    res.status(204).end();
   });
 
   router.get("/me", requireOwnerAuth(deps), (req, res) => {

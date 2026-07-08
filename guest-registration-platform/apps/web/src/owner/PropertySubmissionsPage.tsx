@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiGet } from "../api/client.js";
-import { useOwnerAuth } from "./OwnerAuthContext.js";
 import OwnerLayout from "./OwnerLayout.js";
 
 type SubmissionRow = {
@@ -21,15 +20,14 @@ type Response = {
 
 export default function PropertySubmissionsPage() {
   const { propertyId } = useParams<{ propertyId: string }>();
-  const { token } = useOwnerAuth();
   const [data, setData] = useState<Response | null>(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    apiGet<Response>(`/v1/owner/properties/${propertyId}/submissions`, token!)
+    apiGet<Response>(`/v1/owner/properties/${propertyId}/submissions`)
       .then(setData)
       .catch(() => setError(true));
-  }, [propertyId, token]);
+  }, [propertyId]);
 
   return (
     <OwnerLayout title={data ? `Submissions — ${data.property.name}` : "Submissions"}>

@@ -18,7 +18,7 @@ const inputClass =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none";
 
 export default function OwnerUsersPage() {
-  const { token, user: me } = useOwnerAuth();
+  const { user: me } = useOwnerAuth();
   const [users, setUsers] = useState<UserEntry[] | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -35,17 +35,17 @@ export default function OwnerUsersPage() {
   });
 
   const load = () => {
-    apiGet<{ users: UserEntry[] }>("/v1/owner/users", token!)
+    apiGet<{ users: UserEntry[] }>("/v1/owner/users")
       .then((data) => setUsers(data.users))
       .catch(() => setGlobalError("Failed to load users."));
   };
 
-  useEffect(load, [token]);
+  useEffect(load, []);
 
   const onCreateUser = handleSubmit(async (data) => {
     setActionError(null);
     try {
-      await apiPost("/v1/owner/users", data, token!);
+      await apiPost("/v1/owner/users", data);
       reset();
       setShowForm(false);
       load();
@@ -61,7 +61,7 @@ export default function OwnerUsersPage() {
   const changeRole = async (userId: string, role: string) => {
     setActionError(null);
     try {
-      await apiPatch(`/v1/owner/users/${userId}/role`, { role }, token!);
+      await apiPatch(`/v1/owner/users/${userId}/role`, { role });
       load();
     } catch (err) {
       setActionError(
@@ -76,7 +76,7 @@ export default function OwnerUsersPage() {
     setActionError(null);
     const path = `/v1/owner/users/${user.id}/${user.status === "ACTIVE" ? "disable" : "enable"}`;
     try {
-      await apiAction(path, token!);
+      await apiAction(path);
       load();
     } catch (err) {
       setActionError(

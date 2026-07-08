@@ -34,8 +34,24 @@ a candidate hardening step.
 
 - Owner passwords: bcrypt cost 12. Login errors are generic (`invalid_credentials`) and a
   constant-work bcrypt compare runs even for unknown emails.
-- JWT: HS256, 12h expiry, issuer + audience validated, algorithm pinned. Every request
-  re-checks user + tenant status in the database.
+- JWT: HS256 by default (4h expiry, issuer + audience validated, algorithm pinned), or
+  RS256 verified against a JWKS endpoint when `OWNER_JWKS_URI` is set — the two modes are
+  mutually exclusive; an HS256 token is rejected outright once JWKS mode is enabled (no
+  downgrade fallback). The JWKS fetch enforces `https://`, a 3s timeout, and no redirects;
+  if no usable key is cached and the fetch fails, auth fails closed (401). Every request
+  re-checks user + tenant status in the database regardless of verification mode.
+- The owner session is an httpOnly, `SameSite=Strict` cookie (`gr_owner_session`),
+  `Secure` in production, host-only (no `Domain` attribute). It is never readable by
+  JavaScript. `POST /v1/owner/auth/login` and `/logout` set `Cache-Control: no-store`.
+  Sending both the cookie and an `Authorization: Bearer` header is rejected as
+  `ambiguous_auth`; the Bearer header itself is only accepted when
+  `ALLOW_BEARER_OWNER_AUTH=true` (default outside production, off in production).
+  **Deploy constraint:** the cookie's `SameSite=Strict` protection depends on the web app
+  and API being same-site (e.g. `app.example.com` + `api.example.com`; **not**
+  `app.example.com` + `api.other.com` — the cookie would stop being sent cross-site).
+- Logout clears the cookie but does not revoke the underlying token server-side; a copied
+  token/cookie remains valid until its (now 4h) expiry. Accepted for MVP; a session table
+  or `jti` denylist would close this gap if needed.
 - RBAC: OWNER and MANAGER may download PDFs; VIEWER sees metadata only (403 on download).
 - Tenant isolation: all owner queries filter by `tenantId`; cross-tenant access returns 404.
 

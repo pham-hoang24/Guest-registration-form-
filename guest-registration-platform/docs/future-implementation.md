@@ -191,8 +191,13 @@ When a PDF download fails due to decryption or integrity problems, write an audi
 ## Files
 
 ```txt
-apps/api/src/routes/ownerSubmissions.ts
+apps/api/src/routes/ownerPassengerCards.ts
 ```
+
+> The PDF download/decrypt/stream flow lives in `ownerPassengerCards.ts` (route
+> `GET /:passengerCardId/pdf`), where the `PDF_INTEGRITY_FAILED` (sha256 mismatch) and
+> `PDF_DECRYPT_FAILED` (decrypt/auth-tag failure) audit branches are wired. The JSON
+> metadata endpoint `ownerSubmissions.ts` does not touch crypto and is not involved.
 
 ## Required Behavior
 
@@ -269,8 +274,10 @@ When an authenticated owner user tries to access a resource they are not allowed
 ## Files
 
 ```txt
-apps/api/src/middleware/auth.ts
+apps/api/src/middleware/rbac.ts
 ```
+
+> Already implemented in commit `5be27f3` — `requireRole` lives in `rbac.ts`, not `auth.ts`.
 
 ## Required Behavior
 

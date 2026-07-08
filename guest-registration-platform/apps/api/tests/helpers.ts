@@ -50,6 +50,29 @@ export function buildTestApp(): { app: Express; deps: AppDeps } {
   return { app: buildApp(deps), deps };
 }
 
+/** Builds a test app with env overrides applied on top of process.env (e.g. OWNER_JWKS_URI). */
+export function buildTestAppWithEnv(envOverrides: NodeJS.ProcessEnv): { app: Express; deps: AppDeps } {
+  const deps: AppDeps = {
+    ...buildTestDeps(),
+    config: configFromEnv({ ...process.env, NODE_ENV: "test", ...envOverrides }),
+  };
+  return { app: buildApp(deps), deps };
+}
+
+const OWNER_COOKIE_NAME = "gr_owner_session";
+
+/** Extracts the raw session cookie value (the JWT) from a login response's Set-Cookie. */
+export function extractSessionCookie(
+  res: { headers: Record<string, unknown> },
+  cookieName: string = OWNER_COOKIE_NAME,
+): string {
+  const setCookie = res.headers["set-cookie"];
+  const cookies = Array.isArray(setCookie) ? setCookie : [];
+  const raw = cookies.find((c) => c.startsWith(`${cookieName}=`));
+  if (!raw) throw new Error(`${cookieName} cookie was not set`);
+  return raw.split(";")[0]!.slice(cookieName.length + 1);
+}
+
 export async function truncateAll(): Promise<void> {
   testQueue.messages.length = 0;
   await testDb.$executeRawUnsafe(

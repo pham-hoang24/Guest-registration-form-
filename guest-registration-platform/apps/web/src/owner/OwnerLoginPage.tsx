@@ -17,10 +17,9 @@ export default function OwnerLoginPage() {
     setError(null);
     try {
       const result = await apiPost<{
-        token: string;
         user: { id: string; email: string; role: "OWNER" | "MANAGER" | "VIEWER"; tenantId: string };
       }>("/v1/owner/auth/login", { email, password });
-      login(result.token, result.user);
+      login(result.user);
       navigate("/owner/properties");
     } catch {
       setError("Invalid email or password.");

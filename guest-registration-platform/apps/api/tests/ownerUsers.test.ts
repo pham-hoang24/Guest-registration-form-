@@ -1,6 +1,13 @@
 import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { buildTestApp, seedFixtures, testDb, truncateAll, type TestFixtures } from "./helpers.js";
+import {
+  buildTestApp,
+  extractSessionCookie,
+  seedFixtures,
+  testDb,
+  truncateAll,
+  type TestFixtures,
+} from "./helpers.js";
 
 const { app } = buildTestApp();
 let fx: TestFixtures;
@@ -10,7 +17,7 @@ async function loginAs(email: string): Promise<string> {
     .post("/v1/owner/auth/login")
     .send({ email, password: fx.password });
   expect(res.status).toBe(200);
-  return res.body.token as string;
+  return extractSessionCookie(res);
 }
 
 beforeEach(async () => {
