@@ -11,9 +11,7 @@ const primary = {
   citizenship: "DE",
   countryOfEntryToFinland: "SE",
   address: "Example Street 1",
-  documentType: "passport",
   documentNumber: "X1234567",
-  email: "anna@example.com",
 };
 
 const base = {
@@ -146,5 +144,48 @@ describe("payloadSchema — rejects unknown fields", () => {
     const r = parse({ people: [{ ...primary, extra: true }] });
     expect(r.success).toBe(false);
     expect(!r.success && hasUnrecognizedKey(r.error.issues, "extra")).toBe(true);
+  });
+
+  // Data minimization: these fields are no longer collected and must be rejected.
+  it.each(["documentType", "email", "phone", "countryOfResidence"])(
+    "rejects the removed field %s",
+    (field) => {
+      const r = parse({ people: [{ ...primary, [field]: "x" }] });
+      expect(r.success).toBe(false);
+      expect(!r.success && hasUnrecognizedKey(r.error.issues, field)).toBe(true);
+    },
+  );
+});
+
+describe("payloadSchema — text normalization", () => {
+  it("NFC-normalizes and collapses whitespace in names", () => {
+    // "A" + combining ring above → single NFC codepoint "Å"; internal whitespace collapses.
+    const r = parse({ people: [{ ...primary, firstName: "Å  nna", lastName: "  Example  " }] });
+    expect(r.success).toBe(true);
+    if (r.success) {
+      const p = r.data.people[0] as { firstName: string; lastName: string };
+      expect(p.firstName).toBe("Å nna");
+      expect(p.lastName).toBe("Example");
+    }
+  });
+
+  it("rejects control characters in a name", () => {
+    expect(parse({ people: [{ ...primary, firstName: `An${String.fromCharCode(8)}na` }] }).success).toBe(false);
+  });
+
+  it("rejects an obvious script payload in the address", () => {
+    expect(parse({ people: [{ ...primary, address: "<script>alert(1)</script>" }] }).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects an over-long address (max 300)", () => {
+    expect(parse({ people: [{ ...primary, address: "x".repeat(301) }] }).success).toBe(false);
+  });
+
+  it("accepts unicode names (Vietnamese + Nordic)", () => {
+    expect(
+      parse({ people: [{ ...primary, firstName: "Nguyễn", lastName: "Hoàng Åström" }] }).success,
+    ).toBe(true);
   });
 });

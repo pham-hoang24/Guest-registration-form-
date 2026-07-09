@@ -7,7 +7,6 @@ import { writeAudit } from "@gr/db";
 import { REQUIREMENT_VERSION, SUPPORTED_LANGUAGES, NORDIC_CITIZENSHIPS } from "@gr/shared";
 import type { AppDeps } from "../deps.js";
 import { buildPassengerCards, DomainValidationError } from "../domain/buildPassengerCards.js";
-import { normalizeFinnishPhone } from "../domain/phone.js";
 import { payloadSchema } from "../domain/submissionSchema.js";
 import { sendError } from "../lib/httpErrors.js";
 import { auditMetaFromRequest } from "../lib/requestMeta.js";
@@ -299,7 +298,6 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
               lastName: p.lastName,
               dateOfBirth: p.dateOfBirth,
               citizenship: "citizenship" in p ? p.citizenship : undefined,
-              documentType: "documentType" in p ? p.documentType : undefined,
               documentNumber: "documentNumber" in p ? p.documentNumber : undefined,
             })),
           },
@@ -308,30 +306,8 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         return { draft, fingerprint, signatureFile: filesByField.get(draft.signatureField)! };
       });
 
-      // 8. Normalize every adult's phone up front (primary + each additional adult).
-      // A phone that's present but unparseable fails the whole request — never
-      // silently dropped — and the normalized value is reused below for both the
-      // card-holder fields and the per-guest Guest.phoneE164 column. Keyed by
-      // object identity: buildPassengerCards() groups references from
-      // payload.people without cloning, so draft.people[0] is one of these keys.
-      const normalizedPhoneByPerson = new Map<(typeof payload.people)[number], string>();
-      for (const person of payload.people) {
-        if (
-          (person.guestType === "primary" || person.guestType === "additional_adult") &&
-          person.phone
-        ) {
-          try {
-            normalizedPhoneByPerson.set(person, normalizeFinnishPhone(person.phone));
-          } catch {
-            sendError(res, 400, "validation_failed", {
-              people: [`Phone number is invalid for ${person.firstName} ${person.lastName}`],
-            });
-            return;
-          }
-        }
-      }
+      // 8. Contact fields (email / phone) are not collected — data minimization.
       const primaryPerson = payload.people.find((p) => p.guestType === "primary")!;
-      const primaryPhone = normalizedPhoneByPerson.get(primaryPerson);
 
       // 9. Transactional insert with row-lock to enforce maxPassengerCards.
 
@@ -388,8 +364,6 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                 retainUntil,
                 deleteAfter,
                 primaryGuestName: [primaryPerson.firstName, primaryPerson.lastName].join(" "),
-                primaryGuestEmail: "email" in primaryPerson ? primaryPerson.email ?? null : null,
-                primaryGuestPhoneE164: primaryPhone ?? null,
               },
             });
           }
@@ -431,8 +405,6 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                   });
                 }
 
-                const phoneE164 = normalizedPhoneByPerson.get(person);
-
                 return {
                   id: guestId,
                   tenantId: link.tenantId,
@@ -446,12 +418,9 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                   isResidentInFinland:
                     "isResidentInFinland" in person ? person.isResidentInFinland : null,
                   address: "address" in person ? person.address ?? null : null,
-                  documentType: "documentType" in person ? person.documentType ?? null : null,
                   documentNumberEncrypted: documentNumberEncrypted ?? null,
                   finnishPersonalIdentityCodeEncrypted:
                     finnishPersonalIdentityCodeEncrypted ?? null,
-                  email: "email" in person ? person.email ?? null : null,
-                  phoneE164: phoneE164 ?? null,
                   isAdult,
                 };
               }),
@@ -477,11 +446,10 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
             });
 
             // Card holder — the primary on the family card, the additional adult
-            // on their own card. Also used below for country-of-entry.
+            // on their own card. Also used below for country-of-entry. Contact
+            // fields (email / phone) are not collected — data minimization.
             const holder = draft.people[0]!;
             const cardHolderName = `${holder.firstName} ${holder.lastName}`;
-            const cardHolderEmail = "email" in holder ? holder.email ?? null : null;
-            const cardHolderPhoneE164 = normalizedPhoneByPerson.get(holder) ?? null;
 
             const { countryOfEntryToFinland, countryOfEntryNotApplicableReason } =
               deriveCountryOfEntry({
@@ -505,8 +473,6 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                 submissionFingerprint: fingerprint,
                 requirementVersion: REQUIREMENT_VERSION,
                 cardHolderName,
-                cardHolderEmail,
-                cardHolderPhoneE164,
                 guests: { create: guestRows },
                 signature: {
                   create: {

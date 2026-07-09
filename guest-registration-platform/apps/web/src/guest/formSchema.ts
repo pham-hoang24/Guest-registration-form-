@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DOCUMENT_TYPES, PURPOSES_OF_STAY, NORDIC_CITIZENSHIPS, ageOn } from "@gr/shared";
+import { PURPOSES_OF_STAY, NORDIC_CITIZENSHIPS, ageOn } from "@gr/shared";
 
 // Lightweight mirror of the API payload schema (apps/api/src/domain/submissionSchema.ts).
 // The server re-validates authoritatively; this exists to guide the guest.
@@ -24,14 +24,11 @@ export const personFormSchema = z.object({
   guestType: z.enum(["primary", "spouse", "child", "additional_adult"]),
   ...name,
   isResidentInFinland: z.boolean().optional(),
-  address: z.string().trim().max(200).optional(),
-  documentType: z.enum(DOCUMENT_TYPES).optional(),
-  documentNumber: z.string().trim().max(100).optional(),
+  address: z.string().trim().max(300).optional(),
+  documentNumber: z.string().trim().max(80).optional(),
   citizenship: z.union([cc, z.literal("")]).optional(),
   countryOfEntryToFinland: z.union([cc, z.literal("")]).optional(),
-  finnishPersonalIdentityCode: z.string().trim().max(100).optional(),
-  email: z.union([z.string().trim().email("Invalid email"), z.literal("")]).optional(),
-  phone: z.string().trim().max(25).optional(),
+  finnishPersonalIdentityCode: z.string().trim().max(32).optional(),
 });
 
 export type PersonForm = z.infer<typeof personFormSchema>;
@@ -68,9 +65,6 @@ export const registrationFormSchema = z
         }
         if (!p.address) {
           ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "address"] });
-        }
-        if (!p.email && !p.phone) {
-          ctx.addIssue({ code: "custom", message: "Email or phone required", path: ["people", i, "email"] });
         }
         const hasPic = Boolean(p.finnishPersonalIdentityCode);
         if (!hasPic) {
@@ -123,13 +117,10 @@ export function toPayloadPeople(people: PersonForm[]): Record<string, unknown>[]
     if (p.guestType === "primary" || p.guestType === "additional_adult") {
       base.isResidentInFinland = Boolean(p.isResidentInFinland);
       base.address = p.address;
-      if (p.documentType) base.documentType = p.documentType;
       if (p.documentNumber) base.documentNumber = p.documentNumber;
       if (p.citizenship) base.citizenship = p.citizenship;
       if (p.countryOfEntryToFinland) base.countryOfEntryToFinland = p.countryOfEntryToFinland;
       if (p.finnishPersonalIdentityCode) base.finnishPersonalIdentityCode = p.finnishPersonalIdentityCode;
-      if (p.email) base.email = p.email;
-      if (p.phone) base.phone = p.phone;
     }
     return base;
   });

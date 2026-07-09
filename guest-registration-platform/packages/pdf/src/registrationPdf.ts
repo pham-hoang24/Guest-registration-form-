@@ -16,11 +16,8 @@ export type RegistrationPdfPerson = {
   citizenship?: string | null;
   isResidentInFinland?: boolean | null;
   address?: string | null;
-  documentType?: string | null;
   documentNumber?: string | null;
   finnishPersonalIdentityCode?: string | null;
-  email?: string | null;
-  phone?: string | null;
 };
 
 export type RegistrationCardPdfInput = {
@@ -167,13 +164,10 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
     "Country of entry",
     input.countryOfEntryToFinland ?? countryExceptionLabel(input.countryOfEntryNotApplicableReason),
   );
-  if (h.documentType) drawField("Document type", h.documentType);
   if (h.documentNumber) drawField("Document number", h.documentNumber);
   if (h.finnishPersonalIdentityCode) {
     drawField("Finnish PIC", h.finnishPersonalIdentityCode);
   }
-  if (h.email) drawField("Email", h.email);
-  if (h.phone) drawField("Phone", h.phone);
   y -= 8;
 
   if (input.accompanying.length > 0) {

@@ -3,7 +3,7 @@ import { useForm, useFieldArray, type UseFormRegister, type FieldErrors } from "
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { DOCUMENT_TYPES, PURPOSES_OF_STAY, type RegistrationLinkInfo } from "@gr/shared";
+import { PURPOSES_OF_STAY, type RegistrationLinkInfo } from "@gr/shared";
 import { ApiError, apiGet, apiPostMultipart } from "../api/client.js";
 import i18n from "../i18n/index.js";
 import SignatureField, { dataUrlToPngBlob } from "./SignatureField.js";
@@ -36,13 +36,10 @@ const emptyPerson = (guestType: PersonForm["guestType"]): PersonForm => ({
   dateOfBirth: "",
   isResidentInFinland: false,
   address: "",
-  documentType: "passport",
   documentNumber: "",
   citizenship: "",
   countryOfEntryToFinland: "",
   finnishPersonalIdentityCode: "",
-  email: "",
-  phone: "",
 });
 
 export default function GuestRegistrationPage() {
@@ -367,29 +364,12 @@ function PersonSection({
           <Field label={t("field.address")} error={pe?.address?.message}>
             <input className={inputClass} {...register(`people.${index}.address`)} />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t("field.documentType")} error={pe?.documentType?.message}>
-              <select className={inputClass} {...register(`people.${index}.documentType`)}>
-                {DOCUMENT_TYPES.map((d) => (
-                  <option key={d} value={d}>{t(`docType.${d}`)}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label={t("field.documentNumber")} error={pe?.documentNumber?.message}>
-              <input className={inputClass} {...register(`people.${index}.documentNumber`)} />
-            </Field>
-          </div>
+          <Field label={t("field.documentNumber")} error={pe?.documentNumber?.message}>
+            <input className={inputClass} {...register(`people.${index}.documentNumber`)} />
+          </Field>
           <Field label={t("field.finnishPic")} error={pe?.finnishPersonalIdentityCode?.message} hint={t("field.finnishPicHint")}>
             <input className={inputClass} {...register(`people.${index}.finnishPersonalIdentityCode`)} />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={t("field.email")} error={pe?.email?.message}>
-              <input type="email" autoComplete="email" className={inputClass} {...register(`people.${index}.email`)} />
-            </Field>
-            <Field label={t("field.phone")} error={pe?.phone?.message} hint={t("field.phoneHint")}>
-              <input type="tel" autoComplete="tel" className={inputClass} {...register(`people.${index}.phone`)} />
-            </Field>
-          </div>
         </>
       )}
     </Section>

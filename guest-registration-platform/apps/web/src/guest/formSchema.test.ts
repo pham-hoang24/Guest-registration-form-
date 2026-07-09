@@ -13,13 +13,10 @@ const adult = (over: Partial<PersonForm> = {}): PersonForm => ({
   dateOfBirth: "1990-04-12",
   isResidentInFinland: false,
   address: "Street 1",
-  documentType: "passport",
   documentNumber: "X1234567",
   citizenship: "DE",
   countryOfEntryToFinland: "SE",
   finnishPersonalIdentityCode: "",
-  email: "a@example.com",
-  phone: "",
   ...over,
 });
 

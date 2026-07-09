@@ -208,9 +208,7 @@ export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) 
       citizenship: "DE",
       countryOfEntryToFinland: "SE",
       address: "Example Street 1, Helsinki",
-      documentType: "passport",
       documentNumber: "X1234567",
-      email: "guest@example.com",
       ...primaryOverrides,
     },
   ];
@@ -224,9 +222,7 @@ export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) 
       isResidentInFinland: false,
       citizenship: "SE",
       address: "Extra Street 1",
-      documentType: "passport",
       documentNumber: `Y000000${i}`,
-      email: `adult${i}@example.com`,
       ...additionalAdultOverrides,
     });
   }

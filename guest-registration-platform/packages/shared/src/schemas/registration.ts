@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { DOCUMENT_TYPES } from "../constants.js";
 
 const MAX_SHORT = 100;
 const MAX_MEDIUM = 200;
@@ -23,7 +22,6 @@ export const guestSchema = z.object({
     .regex(/^[A-Za-z]{2}$/, "Nationality must be an ISO 3166-1 alpha-2 code")
     .transform((value) => value.toUpperCase()),
   address: z.string().trim().min(1).max(MAX_MEDIUM),
-  documentType: z.enum(DOCUMENT_TYPES),
   documentNumber: z.string().trim().min(1).max(MAX_SHORT),
   isPrimaryGuest: z.boolean(),
 });

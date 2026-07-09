@@ -101,11 +101,8 @@ export async function generatePdfForPassengerCard(
       citizenship: holderGuest.citizenship,
       isResidentInFinland: holderGuest.isResidentInFinland,
       address: holderGuest.address,
-      documentType: holderGuest.documentType,
       documentNumber,
       finnishPersonalIdentityCode,
-      email: holderGuest.email,
-      phone: holderGuest.phoneE164,
     };
 
     const accompanying: RegistrationPdfPerson[] = card.guests

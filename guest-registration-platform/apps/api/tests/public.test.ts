@@ -2,6 +2,7 @@ import request from "supertest";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { generateRegistrationToken, hashRegistrationToken } from "@gr/crypto";
 import { createRegistrationLinkWithStay } from "@gr/db";
+import { REQUIREMENT_VERSION } from "@gr/shared";
 import {
   VALID_PNG,
   buildMultipartSubmission,
@@ -48,7 +49,7 @@ describe("GET /v1/public/registration-links/:token", () => {
     expect(res.body).toEqual({
       propertyName: "Cabin A",
       propertyCity: "Tampere",
-      requirementVersion: "FI-ACCOMMODATION-2026-01",
+      requirementVersion: REQUIREMENT_VERSION,
       supportedLanguages: ["en", "fi", "sv"],
     });
     // No IDs or address leak through the public endpoint.
@@ -116,8 +117,10 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     // retainUntil/deleteAfter are set on first submit.
     expect(stay!.retainUntil).not.toBeNull();
     expect(stay!.deleteAfter).not.toBeNull();
-    // Primary guest contact info copied to stay.
-    expect(stay!.primaryGuestEmail).toBe("guest@example.com");
+    // Contact info (email/phone) is not collected — data minimization.
+    expect(stay!.primaryGuestName).toBe("Anna Example");
+    expect(stay!.primaryGuestEmail).toBeNull();
+    expect(stay!.primaryGuestPhoneE164).toBeNull();
 
     // Cards under the stay.
     const cards = await testDb.passengerCard.findMany({
@@ -184,12 +187,8 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     }
   });
 
-  it("201: additional-adult card stores that adult's own holder name/email/phone, not the primary's", async () => {
-    const { payload, signatures } = buildMultipartSubmission({
-      additionalAdultCount: 1,
-      primaryOverrides: { phone: "+358401111111" },
-      additionalAdultOverrides: { phone: "0402222222" },
-    });
+  it("201: additional-adult card stores that adult's own holder name, not the primary's", async () => {
+    const { payload, signatures } = buildMultipartSubmission({ additionalAdultCount: 1 });
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
     expect(res.status).toBe(201);
 
@@ -201,19 +200,19 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
 
     const [primaryCard, additionalCard] = cards;
     expect(primaryCard!.cardHolderName).toBe("Anna Example");
-    expect(primaryCard!.cardHolderEmail).toBe("guest@example.com");
-    expect(primaryCard!.cardHolderPhoneE164).toBe("+358401111111");
 
     expect(additionalCard!.cardType).toBe("ADDITIONAL_ADULT_INDIVIDUAL");
     expect(additionalCard!.cardHolderName).toBe("Adult0 Extra");
-    expect(additionalCard!.cardHolderEmail).toBe("adult0@example.com");
-    expect(additionalCard!.cardHolderPhoneE164).toBe("+358402222222");
-    // Must not have inherited the primary's contact info.
-    expect(additionalCard!.cardHolderEmail).not.toBe(primaryCard!.cardHolderEmail);
-    expect(additionalCard!.cardHolderPhoneE164).not.toBe(primaryCard!.cardHolderPhoneE164);
+    expect(additionalCard!.cardHolderName).not.toBe(primaryCard!.cardHolderName);
+
+    // Contact fields (email/phone) are not collected — data minimization.
+    for (const card of cards) {
+      expect(card.cardHolderEmail).toBeNull();
+      expect(card.cardHolderPhoneE164).toBeNull();
+    }
   });
 
-  it("400 validation_failed when an additional adult's phone is present but invalid", async () => {
+  it("400 validation_failed when an unknown contact field (phone) is present", async () => {
     const { payload, signatures } = buildMultipartSubmission({
       additionalAdultCount: 1,
       additionalAdultOverrides: { phone: "123" },
@@ -223,17 +222,6 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(res.body.error).toBe("validation_failed");
     const count = await testDb.passengerCard.count({ where: { guestSubmissionId: fx.stayA.id } });
     expect(count).toBe(0);
-  });
-
-  it("201: additional adult with no phone but a valid email still succeeds", async () => {
-    const { payload, signatures } = buildMultipartSubmission({ additionalAdultCount: 1 });
-    const res = await postSubmission(fx.rawTokenA, payload, signatures);
-    expect(res.status).toBe(201);
-    const additionalCard = await testDb.passengerCard.findFirst({
-      where: { guestSubmissionId: fx.stayA.id, cardType: "ADDITIONAL_ADULT_INDIVIDUAL" },
-    });
-    expect(additionalCard!.cardHolderPhoneE164).toBeNull();
-    expect(additionalCard!.cardHolderEmail).toBe("adult0@example.com");
   });
 
   it("201: single primary guest (no additional adults)", async () => {

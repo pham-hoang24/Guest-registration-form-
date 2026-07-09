@@ -7,7 +7,6 @@ const validGuest = {
   dateOfBirth: "1995-04-12",
   nationality: "FI",
   address: "Example Street 1, Helsinki",
-  documentType: "passport",
   documentNumber: "X1234567",
   isPrimaryGuest: true,
 };

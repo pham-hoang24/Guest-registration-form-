@@ -1,14 +1,24 @@
 import { z } from "zod";
-import { isoDateSchema, DOCUMENT_TYPES, PURPOSES_OF_STAY, NORDIC_CITIZENSHIPS, ageOn } from "@gr/shared";
+import {
+  isoDateSchema,
+  normalizedString,
+  PURPOSES_OF_STAY,
+  NORDIC_CITIZENSHIPS,
+  ageOn,
+} from "@gr/shared";
 
-const MAX_SHORT = 100;
-const MAX_MEDIUM = 200;
+// Per-field length limits (data minimization + defense in depth). Contact fields
+// (email / phone) and documentType are NOT collected — see the requirement engine.
+const MAX_NAME = 100;
+const MAX_ADDRESS = 300;
+const MAX_DOCUMENT_NUMBER = 80;
+const MAX_PIC = 32;
 
 const NORDIC_COUNTRIES = new Set<string>(NORDIC_CITIZENSHIPS);
 
 const nameFields = {
-  firstName: z.string().trim().min(1).max(MAX_SHORT),
-  lastName: z.string().trim().min(1).max(MAX_SHORT),
+  firstName: normalizedString({ max: MAX_NAME }),
+  lastName: normalizedString({ max: MAX_NAME }),
   dateOfBirth: isoDateSchema,
 };
 
@@ -21,14 +31,11 @@ const citizenshipField = z
 const adultBaseObject = z.object({
   ...nameFields,
   isResidentInFinland: z.boolean(),
-  address: z.string().trim().min(1).max(MAX_MEDIUM),
-  documentType: z.enum(DOCUMENT_TYPES).optional(),
-  documentNumber: z.string().trim().min(1).max(MAX_SHORT).optional(),
+  address: normalizedString({ max: MAX_ADDRESS }),
+  documentNumber: normalizedString({ max: MAX_DOCUMENT_NUMBER }).optional(),
   countryOfEntryToFinland: citizenshipField.optional(),
   citizenship: citizenshipField.optional(),
-  finnishPersonalIdentityCode: z.string().trim().min(1).max(MAX_SHORT).optional(),
-  email: z.string().trim().email().max(MAX_MEDIUM).optional(),
-  phone: z.string().trim().min(5).max(25).optional(),
+  finnishPersonalIdentityCode: normalizedString({ max: MAX_PIC }).optional(),
 });
 
 // Plain ZodObjects (no superRefine) so .extend() works and discriminatedUnion accepts them.
@@ -64,15 +71,6 @@ export type PayloadPerson = z.infer<typeof personSchema>;
 type AdultPerson = z.infer<typeof primarySchema> | z.infer<typeof additionalAdultSchema>;
 
 function validateAdultFields(data: AdultPerson, ctx: z.RefinementCtx, path: (string | number)[]) {
-  // At least one contact method required.
-  if (!data.email && !data.phone) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "At least one of email or phone is required",
-      path: [...path, "email"],
-    });
-  }
-
   const hasPic = Boolean(data.finnishPersonalIdentityCode);
 
   if (!hasPic) {

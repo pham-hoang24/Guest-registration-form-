@@ -12,7 +12,6 @@ type CardGuest = {
   lastName: string;
   dateOfBirth: string;
   citizenship: string | null;
-  documentType: string | null;
   isAdult: boolean;
 };
 
@@ -37,8 +36,6 @@ type SubmissionDetail = {
   departureDateKnown: boolean;
   purposeOfStay: string | null;
   requirementVersion: string;
-  primaryGuestEmail: string | null;
-  primaryGuestPhone: string | null;
   submittedAt: string;
   retainUntil: string | null;
   legalBasis: string;
@@ -80,8 +77,6 @@ export default function SubmissionDetailPage() {
               />
               <Item label="Purpose" value={detail.purposeOfStay ?? "—"} />
               <Item label="Submitted" value={new Date(detail.submittedAt).toLocaleString()} />
-              <Item label="Contact email" value={detail.primaryGuestEmail ?? "—"} />
-              <Item label="Contact phone" value={detail.primaryGuestPhone ?? "—"} />
               <Item label="Requirement version" value={detail.requirementVersion} />
               <Item label="Retained until" value={detail.retainUntil?.slice(0, 10) ?? "—"} />
             </dl>
@@ -112,7 +107,6 @@ export default function SubmissionDetailPage() {
                     <p className="text-slate-500">
                       Born {guest.dateOfBirth}
                       {guest.citizenship ? ` · ${guest.citizenship}` : ""}
-                      {guest.documentType ? ` · ${guest.documentType}` : ""}
                     </p>
                   </li>
                 ))}

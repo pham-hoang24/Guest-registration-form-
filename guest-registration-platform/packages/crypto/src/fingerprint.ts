@@ -12,7 +12,6 @@ export type GuestFingerprintData = {
   lastName: string;
   dateOfBirth: string;
   citizenship?: string;
-  documentType?: string;
   documentNumber?: string;
 };
 
@@ -29,7 +28,6 @@ function normalizeGuest(g: GuestFingerprintData): Record<string, string | undefi
     lastName: g.lastName.trim().toLowerCase(),
     dateOfBirth: g.dateOfBirth,
     citizenship: g.citizenship?.trim().toUpperCase(),
-    documentType: g.documentType?.trim().toLowerCase(),
     documentNumber: g.documentNumber?.trim().toUpperCase(),
   };
 }
