@@ -59,6 +59,25 @@ export async function buildRedisRateLimitStore(redisUrl: string, prefix: string)
   });
 }
 
+/**
+ * Registration-link create/replace limit: 5 per property per hour. Keyed by
+ * `tenantId:propertyId` (damage is property-level, not actor-level, so OWNER and
+ * MANAGER share the quota). Must run AFTER requireRole so VIEWER 403s never
+ * consume quota. Distributed via Redis when `store` is provided.
+ */
+export function activeLinkRateLimit(config: ApiConfig, store?: Store): RequestHandler {
+  if (!config.rateLimitEnabled) return noop();
+  return rateLimit({
+    windowMs: ONE_HOUR,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "too_many_requests" },
+    keyGenerator: (req) => `${req.auth?.tenantId ?? "anon"}:${req.params.propertyId ?? ""}`,
+    ...(store ? { store } : {}),
+  });
+}
+
 /** Brute-force protection for owner login. Distributed via Redis when `store` is provided. */
 export function loginRateLimit(config: ApiConfig, store?: Store): RequestHandler {
   if (!config.rateLimitEnabled) return noop();

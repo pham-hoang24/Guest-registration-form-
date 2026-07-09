@@ -30,15 +30,21 @@ const queue = await queueProducerFromEnv(process.env, {
 
 // Verifying the connection here means a misconfigured Redis fails startup
 // loudly instead of silently falling back to per-process rate limiting.
-const [loginRateLimitStore, publicGetRateLimitStore, publicPostRateLimitStore, publicPostHourlyRateLimitStore] =
-  config.redisUrl
-    ? await Promise.all([
-        buildRedisRateLimitStore(config.redisUrl, "login:"),
-        buildRedisRateLimitStore(config.redisUrl, "pub-get:"),
-        buildRedisRateLimitStore(config.redisUrl, "pub-post:"),
-        buildRedisRateLimitStore(config.redisUrl, "pub-post-hr:"),
-      ])
-    : [undefined, undefined, undefined, undefined];
+const [
+  loginRateLimitStore,
+  publicGetRateLimitStore,
+  publicPostRateLimitStore,
+  publicPostHourlyRateLimitStore,
+  activeLinkRateLimitStore,
+] = config.redisUrl
+  ? await Promise.all([
+      buildRedisRateLimitStore(config.redisUrl, "login:"),
+      buildRedisRateLimitStore(config.redisUrl, "pub-get:"),
+      buildRedisRateLimitStore(config.redisUrl, "pub-post:"),
+      buildRedisRateLimitStore(config.redisUrl, "pub-post-hr:"),
+      buildRedisRateLimitStore(config.redisUrl, "active-link:"),
+    ])
+  : [undefined, undefined, undefined, undefined, undefined];
 
 const app = buildApp({
   db,
@@ -48,6 +54,7 @@ const app = buildApp({
   queue,
   config,
   loginRateLimitStore,
+  activeLinkRateLimitStore,
   publicRateLimitStores: {
     get: publicGetRateLimitStore,
     postMinute: publicPostRateLimitStore,

@@ -64,3 +64,29 @@ export const registrationLinkInfoSchema = z.object({
 });
 
 export type RegistrationLinkInfo = z.infer<typeof registrationLinkInfoSchema>;
+
+/** Allowed link lifetimes (hours). No non-expiring links, no arbitrary values. */
+export const LINK_TTL_HOURS = [24, 48, 72, 168] as const;
+export type LinkTtlHours = (typeof LINK_TTL_HOURS)[number];
+
+/**
+ * Owner request to create/replace a property's single active registration link.
+ * Departure may equal arrival (same-day). `expiresAt` is derived server-side
+ * from `linkTtlHours`; the client never supplies a raw expiry.
+ */
+export const activeRegistrationLinkRequestSchema = z
+  .object({
+    arrivalDate: isoDateSchema,
+    departureDate: isoDateSchema,
+    maxPassengerCards: z.number().int().min(1).max(20).default(20),
+    linkTtlHours: z
+      .union([z.literal(24), z.literal(48), z.literal(72), z.literal(168)])
+      .default(48),
+  })
+  .strict()
+  .refine((data) => data.departureDate >= data.arrivalDate, {
+    message: "Departure date must be on or after arrival date",
+    path: ["departureDate"],
+  });
+
+export type ActiveRegistrationLinkRequest = z.infer<typeof activeRegistrationLinkRequestSchema>;

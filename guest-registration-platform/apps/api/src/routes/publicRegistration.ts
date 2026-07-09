@@ -296,6 +296,7 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         | { kind: "exact_duplicate"; cardIds: string[] }
         | { kind: "partial_overlap" }
         | { kind: "capacity_exceeded" }
+        | { kind: "purpose_mismatch" }
         | { kind: "inserted"; cardIds: string[] };
 
       const incomingFingerprints = cardPrepared.map((c) => c.fingerprint);
@@ -305,6 +306,18 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         txResult = await db.$transaction(async (tx) => {
           // Row-lock the stay to prevent concurrent over-insertion.
           await tx.$queryRaw`SELECT id FROM "GuestSubmission" WHERE id = ${stay.id} FOR UPDATE`;
+
+          // Re-read purpose / retention markers under the lock. Stays created by
+          // the owner start with no purpose; the first accepted card fixes it and
+          // later cards must match. A concurrent first submit may have set it
+          // after we resolved the link outside the transaction.
+          const current = await tx.guestSubmission.findUniqueOrThrow({
+            where: { id: stay.id },
+            select: { retainUntil: true, purposeOfStay: true },
+          });
+          if (current.purposeOfStay && payload.purposeOfStay !== current.purposeOfStay) {
+            return { kind: "purpose_mismatch" };
+          }
 
           // Load existing fingerprints.
           const existing = await tx.passengerCard.findMany({
@@ -334,8 +347,8 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
           let cardNumber = existing.length + 1;
           const insertedCardIds: string[] = [];
 
-          // Set retainUntil / deleteAfter on first submit if not yet set.
-          if (!stay.retainUntil) {
+          // Set retainUntil / deleteAfter and fix the purpose on first submit.
+          if (!current.retainUntil) {
             const now = new Date();
             const retainUntil = new Date(now.getTime() + deps.config.retentionDefaultDays * DAY_MS);
             const deleteAfter = new Date(retainUntil.getTime() + deps.config.retentionGraceDays * DAY_MS);
@@ -344,6 +357,8 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
               data: {
                 retainUntil,
                 deleteAfter,
+                // First accepted card fixes the purpose when the owner left it unset.
+                purposeOfStay: current.purposeOfStay ?? payload.purposeOfStay,
                 primaryGuestName: [primaryPerson.firstName, primaryPerson.lastName].join(" "),
               },
             });
@@ -547,6 +562,11 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
 
       if (txResult.kind === "capacity_exceeded") {
         sendError(res, 409, "max_passenger_cards_exceeded");
+        return;
+      }
+
+      if (txResult.kind === "purpose_mismatch") {
+        sendError(res, 409, "stay_fields_mismatch");
         return;
       }
 

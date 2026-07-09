@@ -60,6 +60,13 @@ async function main() {
     },
   });
 
+  // At most one ACTIVE link per property (enforced by a partial unique index).
+  // Revoke any prior active link so repeated seed runs stay idempotent.
+  await db.registrationLink.updateMany({
+    where: { propertyId: property.id, status: "ACTIVE" },
+    data: { status: "REVOKED" },
+  });
+
   // A fresh token is generated on every seed run; only its hash is stored.
   const rawToken = generateRegistrationToken();
   await db.registrationLink.create({
