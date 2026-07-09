@@ -73,6 +73,27 @@ describe("generateRegistrationPdf", () => {
     expect(bytes.length).toBeGreaterThan(500);
   });
 
+  it("renders a PIC-identified holder and rider with no date of birth", async () => {
+    const bytes = await generateRegistrationPdf({
+      ...input,
+      cardHolder: {
+        ...input.cardHolder,
+        dateOfBirth: null,
+        finnishPersonalIdentityCode: "120490-1235",
+      },
+      accompanying: [
+        {
+          roleOnCard: "MINOR_CHILD",
+          firstName: "Cara",
+          lastName: "Example",
+          dateOfBirth: null,
+          finnishPersonalIdentityCode: "010115A002C",
+        },
+      ],
+    });
+    expect(bytes.length).toBeGreaterThan(500);
+  });
+
   it("embeds Unicode names without mangling to '?' (Vietnamese + Nordic)", async () => {
     const bytes = await generateRegistrationPdf({
       ...input,

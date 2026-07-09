@@ -1,37 +1,49 @@
 import { z } from "zod";
-import { PURPOSES_OF_STAY, NORDIC_CITIZENSHIPS, ageOn } from "@gr/shared";
+import {
+  PURPOSES_OF_STAY,
+  NORDIC_CITIZENSHIPS,
+  ageOn,
+  isValidFinnishPic,
+  isKnownCountryCode,
+  finnishPicBirthDate,
+} from "@gr/shared";
 
 // Lightweight mirror of the API payload schema (apps/api/src/domain/submissionSchema.ts).
 // The server re-validates authoritatively; this exists to guide the guest.
 const NORDIC = new Set<string>(NORDIC_CITIZENSHIPS);
 
 const iso = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
-const cc = z
-  .string()
-  .trim()
-  .regex(/^[A-Za-z]{2}$/, "Two-letter code")
-  .transform((v) => v.toUpperCase());
 
+// Identity is PIC-or-DOB for every person; both optional here, exactly-one enforced below.
 const name = {
   firstName: z.string().trim().min(1, "Required").max(100),
   lastName: z.string().trim().min(1, "Required").max(100),
-  dateOfBirth: iso,
+  dateOfBirth: z.string().trim().optional(),
+  finnishPersonalIdentityCode: z.string().trim().max(32).optional(),
 };
 
-// A single "person" row. All adult fields are optional at the field level and
-// enforced conditionally in the superRefine below (matching the server).
+// A single "person" row. All conditional fields are optional at the field level
+// and enforced in the superRefine below (matching the server).
 export const personFormSchema = z.object({
   guestType: z.enum(["primary", "spouse", "child", "additional_adult"]),
   ...name,
   isResidentInFinland: z.boolean().optional(),
   address: z.string().trim().max(300).optional(),
   documentNumber: z.string().trim().max(80).optional(),
-  citizenship: z.union([cc, z.literal("")]).optional(),
-  countryOfEntryToFinland: z.union([cc, z.literal("")]).optional(),
-  finnishPersonalIdentityCode: z.string().trim().max(32).optional(),
+  citizenship: z.string().trim().optional(),
+  countryOfEntryToFinland: z.string().trim().optional(),
 });
 
 export type PersonForm = z.infer<typeof personFormSchema>;
+
+/** Resolves a person's birth date from DOB or a valid PIC, else null. */
+function birthDateOf(p: PersonForm): string | null {
+  if (p.dateOfBirth) return p.dateOfBirth;
+  if (p.finnishPersonalIdentityCode && isValidFinnishPic(p.finnishPersonalIdentityCode)) {
+    return finnishPicBirthDate(p.finnishPersonalIdentityCode);
+  }
+  return null;
+}
 
 export const registrationFormSchema = z
   .object({
@@ -56,30 +68,55 @@ export const registrationFormSchema = z
     }
 
     data.people.forEach((p, i) => {
-      const age = ageOn(p.dateOfBirth, data.arrivalDate || p.dateOfBirth);
+      const hasDob = Boolean(p.dateOfBirth);
+      const hasPic = Boolean(p.finnishPersonalIdentityCode);
+
+      // Exactly one of DOB or PIC.
+      if (hasDob && hasPic) {
+        ctx.addIssue({ code: "custom", message: "Provide either a date of birth or a PIC, not both", path: ["people", i, "dateOfBirth"] });
+      } else if (!hasDob && !hasPic) {
+        ctx.addIssue({ code: "custom", message: "Date of birth or Finnish personal identity code required", path: ["people", i, "dateOfBirth"] });
+      }
+      if (hasPic && !isValidFinnishPic(p.finnishPersonalIdentityCode!)) {
+        ctx.addIssue({ code: "custom", message: "Invalid Finnish personal identity code", path: ["people", i, "finnishPersonalIdentityCode"] });
+      }
+
+      const birthDate = birthDateOf(p);
+      const age = birthDate ? ageOn(birthDate, data.arrivalDate || birthDate) : null;
       const isAdultType = p.guestType === "primary" || p.guestType === "additional_adult";
 
       if (isAdultType) {
-        if (age < 18) {
+        if (age !== null && age < 18) {
           ctx.addIssue({ code: "custom", message: "Must be 18+ on arrival", path: ["people", i, "dateOfBirth"] });
         }
         if (!p.address) {
           ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "address"] });
         }
-        const hasPic = Boolean(p.finnishPersonalIdentityCode);
-        if (!hasPic) {
-          if (!p.citizenship) {
-            ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "citizenship"] });
-          } else if (!p.isResidentInFinland && !NORDIC.has(p.citizenship)) {
-            if (!p.countryOfEntryToFinland) {
-              ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "countryOfEntryToFinland"] });
-            }
-            if (!p.documentNumber) {
-              ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "documentNumber"] });
-            }
-          }
+        if (p.citizenship && !isKnownCountryCode(p.citizenship)) {
+          ctx.addIssue({ code: "custom", message: "Unknown country", path: ["people", i, "citizenship"] });
         }
-      } else if (p.guestType === "child" && age >= 18) {
+        if (p.countryOfEntryToFinland && !isKnownCountryCode(p.countryOfEntryToFinland)) {
+          ctx.addIssue({ code: "custom", message: "Unknown country", path: ["people", i, "countryOfEntryToFinland"] });
+        }
+        // Citizenship required only when identified by DOB (no PIC).
+        if (!hasPic && !p.citizenship) {
+          ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "citizenship"] });
+        }
+        // Country of entry required for anyone not resident (no Nordic exemption).
+        if (!p.isResidentInFinland && !p.countryOfEntryToFinland) {
+          ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "countryOfEntryToFinland"] });
+        }
+        // Document number required only for a non-resident, non-Nordic traveler without a PIC.
+        if (
+          !p.isResidentInFinland &&
+          !hasPic &&
+          p.citizenship &&
+          !NORDIC.has(p.citizenship.toUpperCase()) &&
+          !p.documentNumber
+        ) {
+          ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "documentNumber"] });
+        }
+      } else if (p.guestType === "child" && age !== null && age >= 18) {
         ctx.addIssue({ code: "custom", message: "Child must be under 18", path: ["people", i, "dateOfBirth"] });
       }
     });
@@ -105,6 +142,13 @@ export function groupIntoCards(people: PersonForm[]): { holder: PersonForm; ride
   return cards;
 }
 
+/** A short human label for a person's identity basis, used in the review step. */
+export function identityLabel(p: PersonForm): string {
+  if (p.dateOfBirth) return p.dateOfBirth;
+  if (p.finnishPersonalIdentityCode) return p.finnishPersonalIdentityCode;
+  return "";
+}
+
 /** Strips empty-string optionals so the JSON payload matches the API schema. */
 export function toPayloadPeople(people: PersonForm[]): Record<string, unknown>[] {
   return people.map((p) => {
@@ -112,15 +156,16 @@ export function toPayloadPeople(people: PersonForm[]): Record<string, unknown>[]
       guestType: p.guestType,
       firstName: p.firstName,
       lastName: p.lastName,
-      dateOfBirth: p.dateOfBirth,
     };
+    // Identity: exactly one of DOB or PIC travels with every person.
+    if (p.dateOfBirth) base.dateOfBirth = p.dateOfBirth;
+    if (p.finnishPersonalIdentityCode) base.finnishPersonalIdentityCode = p.finnishPersonalIdentityCode;
     if (p.guestType === "primary" || p.guestType === "additional_adult") {
       base.isResidentInFinland = Boolean(p.isResidentInFinland);
       base.address = p.address;
       if (p.documentNumber) base.documentNumber = p.documentNumber;
       if (p.citizenship) base.citizenship = p.citizenship;
       if (p.countryOfEntryToFinland) base.countryOfEntryToFinland = p.countryOfEntryToFinland;
-      if (p.finnishPersonalIdentityCode) base.finnishPersonalIdentityCode = p.finnishPersonalIdentityCode;
     }
     return base;
   });

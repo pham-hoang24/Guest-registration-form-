@@ -12,7 +12,8 @@ export type RegistrationPdfPerson = {
   roleOnCard: string;
   firstName: string;
   lastName: string;
-  dateOfBirth: string;
+  /** Null on the PIC path; identity is PIC-or-DOB, exactly one is present. */
+  dateOfBirth: string | null;
   citizenship?: string | null;
   isResidentInFinland?: boolean | null;
   address?: string | null;
@@ -156,7 +157,9 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
   drawSectionRule(page);
   const h = input.cardHolder;
   drawField("Name", `${h.firstName} ${h.lastName}`);
-  drawField("Date of birth", h.dateOfBirth);
+  // Identity is PIC-or-DOB: render whichever the guest provided.
+  if (h.dateOfBirth) drawField("Date of birth", h.dateOfBirth);
+  if (h.finnishPersonalIdentityCode) drawField("Finnish PIC", h.finnishPersonalIdentityCode);
   if (h.citizenship) drawField("Citizenship", h.citizenship);
   drawField("Resident in Finland", h.isResidentInFinland ? "Yes" : "No");
   if (h.address) drawField("Address", h.address);
@@ -165,16 +168,19 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
     input.countryOfEntryToFinland ?? countryExceptionLabel(input.countryOfEntryNotApplicableReason),
   );
   if (h.documentNumber) drawField("Document number", h.documentNumber);
-  if (h.finnishPersonalIdentityCode) {
-    drawField("Finnish PIC", h.finnishPersonalIdentityCode);
-  }
   y -= 8;
 
   if (input.accompanying.length > 0) {
     drawText("Accompanying Persons", { font: bold, size: 12 });
     drawSectionRule(page);
     input.accompanying.forEach((person) => {
-      drawField(personRoleLabel(person.roleOnCard), `${person.firstName} ${person.lastName} (b. ${person.dateOfBirth})`);
+      const identity = person.dateOfBirth
+        ? `b. ${person.dateOfBirth}`
+        : person.finnishPersonalIdentityCode
+          ? `PIC ${person.finnishPersonalIdentityCode}`
+          : "";
+      const suffix = identity ? ` (${identity})` : "";
+      drawField(personRoleLabel(person.roleOnCard), `${person.firstName} ${person.lastName}${suffix}`);
     });
     y -= 8;
   }

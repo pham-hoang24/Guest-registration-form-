@@ -72,7 +72,8 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         pdfAvailable: card.encryptedPdf !== null,
         guests: card.guests.map((g) => ({
           ...g,
-          dateOfBirth: g.dateOfBirth.toISOString().slice(0, 10),
+          // DOB is null on the PIC path (identity is PIC-or-DOB).
+          dateOfBirth: g.dateOfBirth?.toISOString().slice(0, 10) ?? null,
         })),
       }));
 

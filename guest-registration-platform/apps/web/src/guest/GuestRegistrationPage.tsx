@@ -11,9 +11,11 @@ import {
   registrationFormSchema,
   groupIntoCards,
   toPayloadPeople,
+  identityLabel,
   type RegistrationForm,
   type PersonForm,
 } from "./formSchema.js";
+import { countryOptions } from "./countryOptions.js";
 
 type PageState =
   | { kind: "loading" }
@@ -223,6 +225,7 @@ export default function GuestRegistrationPage() {
                 register={register}
                 errors={errors}
                 guestType={people?.[index]?.guestType ?? "primary"}
+                locale={currentLang}
                 t={t}
                 onRemove={index > 0 ? () => remove(index) : undefined}
               />
@@ -260,10 +263,10 @@ export default function GuestRegistrationPage() {
                 <p className="font-medium text-slate-900">
                   {card.holder.firstName} {card.holder.lastName}
                 </p>
-                <p className="text-sm text-slate-500">{t("field.dateOfBirth")}: {card.holder.dateOfBirth}</p>
+                <p className="text-sm text-slate-500">{identityLabel(card.holder)}</p>
                 {card.riders.map((r, i) => (
                   <p key={i} className="text-sm text-slate-600">
-                    {t(`guestType.${r.guestType}`)}: {r.firstName} {r.lastName} ({r.dateOfBirth})
+                    {t(`guestType.${r.guestType}`)}: {r.firstName} {r.lastName} ({identityLabel(r)})
                   </p>
                 ))}
                 <div className="mt-3">
@@ -311,6 +314,7 @@ function PersonSection({
   register,
   errors,
   guestType,
+  locale,
   t,
   onRemove,
 }: {
@@ -318,6 +322,7 @@ function PersonSection({
   register: UseFormRegister<RegistrationForm>;
   errors: FieldErrors<RegistrationForm>;
   guestType: PersonForm["guestType"];
+  locale: string;
   t: (key: string, opts?: Record<string, unknown>) => string;
   onRemove?: () => void;
 }) {
@@ -325,6 +330,7 @@ function PersonSection({
   const pe = errors.people?.[index];
   const title =
     index === 0 ? t("section.primaryGuest") : t(`guestType.${guestType}`);
+  const countries = countryOptions(locale);
 
   return (
     <Section
@@ -345,8 +351,13 @@ function PersonSection({
           <input className={inputClass} {...register(`people.${index}.lastName`)} />
         </Field>
       </div>
-      <Field label={t("field.dateOfBirth")} error={pe?.dateOfBirth?.message}>
+
+      {/* Identity is PIC-or-DOB: provide exactly one. */}
+      <Field label={t("field.dateOfBirth")} error={pe?.dateOfBirth?.message} hint={t("field.identityHint")}>
         <input type="date" className={inputClass} {...register(`people.${index}.dateOfBirth`)} />
+      </Field>
+      <Field label={t("field.finnishPic")} error={pe?.finnishPersonalIdentityCode?.message} hint={t("field.finnishPicHint")}>
+        <input className={inputClass} {...register(`people.${index}.finnishPersonalIdentityCode`)} />
       </Field>
 
       {isAdult && (
@@ -356,10 +367,10 @@ function PersonSection({
             <span>{t("field.isResidentInFinland")}</span>
           </label>
           <Field label={t("field.citizenship")} error={pe?.citizenship?.message}>
-            <input className={inputClass} placeholder="FI" maxLength={2} {...register(`people.${index}.citizenship`)} />
+            <CountrySelect options={countries} placeholder={t("field.countrySelect")} {...register(`people.${index}.citizenship`)} />
           </Field>
           <Field label={t("field.countryOfEntry")} error={pe?.countryOfEntryToFinland?.message}>
-            <input className={inputClass} placeholder="SE" maxLength={2} {...register(`people.${index}.countryOfEntryToFinland`)} />
+            <CountrySelect options={countries} placeholder={t("field.countrySelect")} {...register(`people.${index}.countryOfEntryToFinland`)} />
           </Field>
           <Field label={t("field.address")} error={pe?.address?.message}>
             <input className={inputClass} {...register(`people.${index}.address`)} />
@@ -367,14 +378,29 @@ function PersonSection({
           <Field label={t("field.documentNumber")} error={pe?.documentNumber?.message}>
             <input className={inputClass} {...register(`people.${index}.documentNumber`)} />
           </Field>
-          <Field label={t("field.finnishPic")} error={pe?.finnishPersonalIdentityCode?.message} hint={t("field.finnishPicHint")}>
-            <input className={inputClass} {...register(`people.${index}.finnishPersonalIdentityCode`)} />
-          </Field>
         </>
       )}
     </Section>
   );
 }
+
+const CountrySelect = ({
+  options,
+  placeholder,
+  ...selectProps
+}: {
+  options: { code: string; name: string }[];
+  placeholder: string;
+} & React.SelectHTMLAttributes<HTMLSelectElement>) => (
+  <select className={inputClass} {...selectProps}>
+    <option value="">{placeholder}</option>
+    {options.map((o) => (
+      <option key={o.code} value={o.code}>
+        {o.name}
+      </option>
+    ))}
+  </select>
+);
 
 function CenteredCard({ children }: { children: React.ReactNode }) {
   return (

@@ -91,11 +91,43 @@ describe("registrationFormSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  it("waives country of entry for a Nordic citizen", () => {
+  it("still requires country of entry for a non-resident Nordic citizen (no exemption)", () => {
     const r = registrationFormSchema.safeParse({
       ...base,
-      people: [adult({ citizenship: "SE", countryOfEntryToFinland: "" })],
+      people: [adult({ citizenship: "SE", countryOfEntryToFinland: "", isResidentInFinland: false })],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("waives country of entry for a resident adult", () => {
+    const r = registrationFormSchema.safeParse({
+      ...base,
+      people: [adult({ citizenship: "SE", countryOfEntryToFinland: "", isResidentInFinland: true })],
     });
     expect(r.success).toBe(true);
+  });
+
+  it("accepts a resident adult identified by a valid PIC instead of a DOB", () => {
+    const r = registrationFormSchema.safeParse({
+      ...base,
+      people: [
+        adult({
+          dateOfBirth: "",
+          finnishPersonalIdentityCode: "120490-1235",
+          citizenship: "",
+          countryOfEntryToFinland: "",
+          isResidentInFinland: true,
+        }),
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a person supplying both a DOB and a PIC", () => {
+    const r = registrationFormSchema.safeParse({
+      ...base,
+      people: [adult({ finnishPersonalIdentityCode: "120490-1235" })],
+    });
+    expect(r.success).toBe(false);
   });
 });

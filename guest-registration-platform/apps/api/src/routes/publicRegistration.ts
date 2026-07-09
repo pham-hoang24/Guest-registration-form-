@@ -4,10 +4,14 @@ import { Router } from "express";
 import multer from "multer";
 import { encryptString, hashRegistrationToken, computeCardFingerprint } from "@gr/crypto";
 import { writeAudit } from "@gr/db";
-import { REQUIREMENT_VERSION, SUPPORTED_LANGUAGES, NORDIC_CITIZENSHIPS } from "@gr/shared";
+import { REQUIREMENT_VERSION, SUPPORTED_LANGUAGES } from "@gr/shared";
 import type { AppDeps } from "../deps.js";
 import { buildPassengerCards, DomainValidationError } from "../domain/buildPassengerCards.js";
 import { payloadSchema } from "../domain/submissionSchema.js";
+import {
+  countryOfEntryApplicability,
+  documentNumberApplicability,
+} from "../domain/passengerCardFields.js";
 import { sendError } from "../lib/httpErrors.js";
 import { auditMetaFromRequest } from "../lib/requestMeta.js";
 import { publicGetRateLimit, publicPostRateLimit, publicPostHourlyRateLimit } from "../middleware/rateLimit.js";
@@ -15,30 +19,6 @@ import { publicGetRateLimit, publicPostRateLimit, publicPostHourlyRateLimit } fr
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_SIGNATURE_BYTES = 200 * 1024;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const NORDIC = new Set<string>(NORDIC_CITIZENSHIPS);
-
-/**
- * Country-of-entry is legally required unless the card holder is a Nordic citizen
- * or resident in Finland — in which case we persist the explicit reason instead
- * of a silent null (validated at the schema level).
- */
-function deriveCountryOfEntry(holder: {
-  citizenship?: string | null;
-  isResidentInFinland?: boolean | null;
-  countryOfEntryToFinland?: string | null;
-}): { countryOfEntryToFinland: string | null; countryOfEntryNotApplicableReason: string | null } {
-  const country = holder.countryOfEntryToFinland ?? null;
-  if (country) {
-    return { countryOfEntryToFinland: country, countryOfEntryNotApplicableReason: null };
-  }
-  if (holder.isResidentInFinland) {
-    return { countryOfEntryToFinland: null, countryOfEntryNotApplicableReason: "RESIDENT_IN_FINLAND" };
-  }
-  if (holder.citizenship && NORDIC.has(holder.citizenship)) {
-    return { countryOfEntryToFinland: null, countryOfEntryNotApplicableReason: "NORDIC_CITIZEN" };
-  }
-  return { countryOfEntryToFinland: null, countryOfEntryNotApplicableReason: null };
-}
 
 function isPngMagic(buf: Buffer): boolean {
   if (buf.length < 8) return false;
@@ -297,6 +277,7 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
               firstName: p.firstName,
               lastName: p.lastName,
               dateOfBirth: p.dateOfBirth,
+              finnishPersonalIdentityCode: p.finnishPersonalIdentityCode,
               citizenship: "citizenship" in p ? p.citizenship : undefined,
               documentNumber: "documentNumber" in p ? p.documentNumber : undefined,
             })),
@@ -389,15 +370,27 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                 let documentNumberEncrypted: string | undefined;
                 let finnishPersonalIdentityCodeEncrypted: string | undefined;
 
-                if ("documentNumber" in person && person.documentNumber) {
-                  documentNumberEncrypted = await encryptString({
-                    plaintext: person.documentNumber,
-                    context: { ...context, field: "documentNumber" },
-                    kms: deps.kms,
+                // Document number is per-adult. When it is not applicable we record
+                // the internal reason and do NOT store any value the guest may have
+                // volunteered (data minimization). Spouse/child never carry one.
+                let documentNumberNotApplicableReason: string | null = null;
+                if (person.guestType === "primary" || person.guestType === "additional_adult") {
+                  const applicability = documentNumberApplicability({
+                    isResidentInFinland: person.isResidentInFinland,
+                    citizenship: person.citizenship ?? null,
+                    finnishPersonalIdentityCode: person.finnishPersonalIdentityCode ?? null,
                   });
+                  documentNumberNotApplicableReason = applicability.notApplicableReason;
+                  if (applicability.required && person.documentNumber) {
+                    documentNumberEncrypted = await encryptString({
+                      plaintext: person.documentNumber,
+                      context: { ...context, field: "documentNumber" },
+                      kms: deps.kms,
+                    });
+                  }
                 }
 
-                if ("finnishPersonalIdentityCode" in person && person.finnishPersonalIdentityCode) {
+                if (person.finnishPersonalIdentityCode) {
                   finnishPersonalIdentityCodeEncrypted = await encryptString({
                     plaintext: person.finnishPersonalIdentityCode,
                     context: { ...context, field: "finnishPersonalIdentityCode" },
@@ -413,12 +406,16 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                   roleOnCard: person.guestType,
                   firstName: person.firstName,
                   lastName: person.lastName,
-                  dateOfBirth: new Date(`${person.dateOfBirth}T00:00:00Z`),
+                  // DOB persisted only on the DOB path; derived from PIC in memory otherwise.
+                  dateOfBirth: person.dateOfBirth
+                    ? new Date(`${person.dateOfBirth}T00:00:00Z`)
+                    : null,
                   citizenship: "citizenship" in person ? person.citizenship ?? null : null,
                   isResidentInFinland:
                     "isResidentInFinland" in person ? person.isResidentInFinland : null,
                   address: "address" in person ? person.address ?? null : null,
                   documentNumberEncrypted: documentNumberEncrypted ?? null,
+                  documentNumberNotApplicableReason,
                   finnishPersonalIdentityCodeEncrypted:
                     finnishPersonalIdentityCodeEncrypted ?? null,
                   isAdult,
@@ -451,14 +448,14 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
             const holder = draft.people[0]!;
             const cardHolderName = `${holder.firstName} ${holder.lastName}`;
 
-            const { countryOfEntryToFinland, countryOfEntryNotApplicableReason } =
-              deriveCountryOfEntry({
-                citizenship: "citizenship" in holder ? holder.citizenship : null,
-                isResidentInFinland:
-                  "isResidentInFinland" in holder ? holder.isResidentInFinland : null,
-                countryOfEntryToFinland:
-                  "countryOfEntryToFinland" in holder ? holder.countryOfEntryToFinland : null,
-              });
+            const holderEntry = countryOfEntryApplicability({
+              isResidentInFinland:
+                "isResidentInFinland" in holder ? holder.isResidentInFinland : false,
+              countryOfEntryToFinland:
+                "countryOfEntryToFinland" in holder ? holder.countryOfEntryToFinland : null,
+            });
+            const countryOfEntryToFinland = holderEntry.value;
+            const countryOfEntryNotApplicableReason = holderEntry.notApplicableReason;
 
             await tx.passengerCard.create({
               data: {

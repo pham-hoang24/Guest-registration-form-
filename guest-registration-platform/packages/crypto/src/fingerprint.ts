@@ -10,7 +10,9 @@ export type GuestFingerprintData = {
   roleOnCard: string;
   firstName: string;
   lastName: string;
-  dateOfBirth: string;
+  // Identity is PIC-or-DOB: exactly one is present per person.
+  dateOfBirth?: string;
+  finnishPersonalIdentityCode?: string;
   citizenship?: string;
   documentNumber?: string;
 };
@@ -27,6 +29,7 @@ function normalizeGuest(g: GuestFingerprintData): Record<string, string | undefi
     firstName: g.firstName.trim().toLowerCase(),
     lastName: g.lastName.trim().toLowerCase(),
     dateOfBirth: g.dateOfBirth,
+    finnishPersonalIdentityCode: g.finnishPersonalIdentityCode?.trim().toUpperCase(),
     citizenship: g.citizenship?.trim().toUpperCase(),
     documentNumber: g.documentNumber?.trim().toUpperCase(),
   };
@@ -43,8 +46,10 @@ export function computeCardFingerprint(card: CardFingerprintData, pepper: string
     // Sort guests by guestType + firstName + lastName for stability regardless of input order.
     guests: [...card.guests]
       .sort((a, b) => {
-        const ka = `${a.guestType}|${a.firstName}|${a.lastName}|${a.dateOfBirth}`;
-        const kb = `${b.guestType}|${b.firstName}|${b.lastName}|${b.dateOfBirth}`;
+        const ida = a.dateOfBirth ?? a.finnishPersonalIdentityCode ?? "";
+        const idb = b.dateOfBirth ?? b.finnishPersonalIdentityCode ?? "";
+        const ka = `${a.guestType}|${a.firstName}|${a.lastName}|${ida}`;
+        const kb = `${b.guestType}|${b.firstName}|${b.lastName}|${idb}`;
         return ka.localeCompare(kb);
       })
       .map(normalizeGuest),

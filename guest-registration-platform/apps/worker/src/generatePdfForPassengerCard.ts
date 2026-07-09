@@ -97,7 +97,8 @@ export async function generatePdfForPassengerCard(
       roleOnCard: holderGuest.roleOnCard,
       firstName: holderGuest.firstName,
       lastName: holderGuest.lastName,
-      dateOfBirth: isoDate(holderGuest.dateOfBirth),
+      // Identity is PIC-or-DOB: DOB is null when the guest gave a PIC.
+      dateOfBirth: holderGuest.dateOfBirth ? isoDate(holderGuest.dateOfBirth) : null,
       citizenship: holderGuest.citizenship,
       isResidentInFinland: holderGuest.isResidentInFinland,
       address: holderGuest.address,
@@ -105,14 +106,28 @@ export async function generatePdfForPassengerCard(
       finnishPersonalIdentityCode,
     };
 
-    const accompanying: RegistrationPdfPerson[] = card.guests
-      .filter((g) => g.id !== holderGuest.id)
-      .map((g) => ({
-        roleOnCard: g.roleOnCard,
-        firstName: g.firstName,
-        lastName: g.lastName,
-        dateOfBirth: isoDate(g.dateOfBirth),
-      }));
+    // Spouse/children ride on the holder's card with name + PIC-or-DOB only.
+    const accompanying: RegistrationPdfPerson[] = await Promise.all(
+      card.guests
+        .filter((g) => g.id !== holderGuest.id)
+        .map(async (g) => {
+          let accompanyingPic: string | null = null;
+          if (g.finnishPersonalIdentityCodeEncrypted) {
+            accompanyingPic = await decryptString({
+              sealed: g.finnishPersonalIdentityCodeEncrypted,
+              context: { ...context, guestId: g.id, field: "finnishPersonalIdentityCode" },
+              kms,
+            });
+          }
+          return {
+            roleOnCard: g.roleOnCard,
+            firstName: g.firstName,
+            lastName: g.lastName,
+            dateOfBirth: g.dateOfBirth ? isoDate(g.dateOfBirth) : null,
+            finnishPersonalIdentityCode: accompanyingPic,
+          };
+        }),
+    );
 
     const pdfBytes = await generateRegistrationPdf({
       guestSubmissionId: submission.id,

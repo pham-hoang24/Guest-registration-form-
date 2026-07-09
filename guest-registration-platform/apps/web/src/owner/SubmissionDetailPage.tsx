@@ -10,7 +10,7 @@ type CardGuest = {
   roleOnCard: string;
   firstName: string;
   lastName: string;
-  dateOfBirth: string;
+  dateOfBirth: string | null;
   citizenship: string | null;
   isAdult: boolean;
 };
@@ -105,7 +105,7 @@ export default function SubmissionDetailPage() {
                       </span>
                     </p>
                     <p className="text-slate-500">
-                      Born {guest.dateOfBirth}
+                      {guest.dateOfBirth ? `Born ${guest.dateOfBirth}` : "Identified by personal identity code"}
                       {guest.citizenship ? ` · ${guest.citizenship}` : ""}
                     </p>
                   </li>

@@ -86,11 +86,15 @@ export const TEM_2026_DRAFT_V1: FormRequirementVersion = {
     isResidentInFinland: { requirementType: "PRODUCT_RULE" },
     documentNumber: {
       requirementType: "LEGAL_INTERPRETATION_PENDING",
-      requiredWhen: "not a Nordic citizen and not resident in Finland",
-      notApplicableReasons: ["NORDIC_CITIZEN", "RESIDENT_IN_FINLAND"],
+      requiredWhen:
+        "identified by date of birth (not a Finnish personal identity code), not a Nordic " +
+        "citizen, and not resident in Finland",
+      notApplicableReasons: ["NORDIC_CITIZEN", "RESIDENT_IN_FINLAND", "HAS_FINNISH_PIC"],
     },
     countryOfEntryToFinland: {
       requirementType: "LEGAL_INTERPRETATION_PENDING",
+      // No Nordic exemption for country-of-entry: anyone not resident in Finland
+      // physically entered from somewhere and must state it.
       requiredWhen: "not resident in Finland",
       notApplicableReasons: ["RESIDENT_IN_FINLAND"],
     },

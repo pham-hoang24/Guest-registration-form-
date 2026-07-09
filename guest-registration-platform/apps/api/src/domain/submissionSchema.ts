@@ -3,9 +3,15 @@ import {
   isoDateSchema,
   normalizedString,
   PURPOSES_OF_STAY,
-  NORDIC_CITIZENSHIPS,
   ageOn,
+  isValidFinnishPic,
+  isKnownCountryCode,
 } from "@gr/shared";
+import {
+  personBirthDate,
+  documentNumberApplicability,
+  countryOfEntryApplicability,
+} from "./passengerCardFields.js";
 
 // Per-field length limits (data minimization + defense in depth). Contact fields
 // (email / phone) and documentType are NOT collected — see the requirement engine.
@@ -14,32 +20,41 @@ const MAX_ADDRESS = 300;
 const MAX_DOCUMENT_NUMBER = 80;
 const MAX_PIC = 32;
 
-const NORDIC_COUNTRIES = new Set<string>(NORDIC_CITIZENSHIPS);
-
-const nameFields = {
-  firstName: normalizedString({ max: MAX_NAME }),
-  lastName: normalizedString({ max: MAX_NAME }),
-  dateOfBirth: isoDateSchema,
-};
-
-const citizenshipField = z
+/** Finnish personal identity code: normalized + format/checksum-validated. */
+const finnishPicField = z
   .string()
   .trim()
-  .regex(/^[A-Za-z]{2}$/, "Must be ISO 3166-1 alpha-2")
-  .transform((v) => v.toUpperCase());
+  .toUpperCase()
+  .max(MAX_PIC)
+  .refine(isValidFinnishPic, "Invalid Finnish personal identity code");
+
+/** ISO 3166-1 alpha-2 code, normalized and rejected unless assigned. */
+const countryCodeField = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .refine(isKnownCountryCode, "Must be a known ISO 3166-1 alpha-2 country code");
+
+// Identity is PIC-or-DOB for EVERY person: both optional at the field level,
+// with exactly-one enforced (and age derived) in payloadSchema.superRefine.
+const identityFields = {
+  firstName: normalizedString({ max: MAX_NAME }),
+  lastName: normalizedString({ max: MAX_NAME }),
+  dateOfBirth: isoDateSchema.optional(),
+  finnishPersonalIdentityCode: finnishPicField.optional(),
+};
 
 const adultBaseObject = z.object({
-  ...nameFields,
+  ...identityFields,
   isResidentInFinland: z.boolean(),
   address: normalizedString({ max: MAX_ADDRESS }),
   documentNumber: normalizedString({ max: MAX_DOCUMENT_NUMBER }).optional(),
-  countryOfEntryToFinland: citizenshipField.optional(),
-  citizenship: citizenshipField.optional(),
-  finnishPersonalIdentityCode: normalizedString({ max: MAX_PIC }).optional(),
+  countryOfEntryToFinland: countryCodeField.optional(),
+  citizenship: countryCodeField.optional(),
 });
 
 // Plain ZodObjects (no superRefine) so .extend() works and discriminatedUnion accepts them.
-// Adult field validation (email/phone, citizenship, residency) is done in payloadSchema.superRefine.
+// Cross-field validation (PIC-vs-DOB, citizenship, residency) is done in payloadSchema.superRefine.
 // .strict() rejects unknown fields at this trust boundary (CLAUDE.md: Zod at every trust boundary).
 const primarySchema = adultBaseObject.extend({ guestType: z.literal("primary") }).strict();
 const additionalAdultSchema = adultBaseObject
@@ -49,14 +64,14 @@ const additionalAdultSchema = adultBaseObject
 const spouseSchema = z
   .object({
     guestType: z.literal("spouse"),
-    ...nameFields,
+    ...identityFields,
   })
   .strict();
 
 const childSchema = z
   .object({
     guestType: z.literal("child"),
-    ...nameFields,
+    ...identityFields,
   })
   .strict();
 
@@ -70,36 +85,69 @@ export const personSchema = z.discriminatedUnion("guestType", [
 export type PayloadPerson = z.infer<typeof personSchema>;
 type AdultPerson = z.infer<typeof primarySchema> | z.infer<typeof additionalAdultSchema>;
 
+/**
+ * Exactly one of Finnish personal identity code or date of birth per person.
+ * Returns the derived birth date (`YYYY-MM-DD`) when resolvable, else null.
+ */
+function validateIdentity(
+  p: { dateOfBirth?: string; finnishPersonalIdentityCode?: string },
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+): string | null {
+  const hasDob = Boolean(p.dateOfBirth);
+  const hasPic = Boolean(p.finnishPersonalIdentityCode);
+
+  if (hasDob && hasPic) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide either a date of birth or a Finnish personal identity code, not both",
+      path: [...path, "dateOfBirth"],
+    });
+    return null;
+  }
+  if (!hasDob && !hasPic) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A date of birth or a Finnish personal identity code is required",
+      path: [...path, "dateOfBirth"],
+    });
+    return null;
+  }
+  // PIC format/checksum already validated at the field level, so a birthdate is derivable.
+  return personBirthDate(p);
+}
+
 function validateAdultFields(data: AdultPerson, ctx: z.RefinementCtx, path: (string | number)[]) {
   const hasPic = Boolean(data.finnishPersonalIdentityCode);
 
-  if (!hasPic) {
-    if (!data.citizenship) {
+  // Citizenship is required only when the person is identified by date of birth.
+  if (!hasPic && !data.citizenship) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "citizenship is required when no Finnish personal identity code is provided",
+      path: [...path, "citizenship"],
+    });
+  }
+
+  // Country of entry: required for anyone not resident in Finland (no Nordic exemption).
+  const coe = countryOfEntryApplicability(data);
+  if (coe.required && !data.countryOfEntryToFinland) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "countryOfEntryToFinland is required for travelers not resident in Finland",
+      path: [...path, "countryOfEntryToFinland"],
+    });
+  }
+
+  // Document number: only determinable once identity basis is known (PIC, or citizenship).
+  if (hasPic || data.citizenship) {
+    const doc = documentNumberApplicability(data);
+    if (doc.required && !data.documentNumber) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "citizenship is required when finnishPersonalIdentityCode is not provided",
-        path: [...path, "citizenship"],
+        message: "documentNumber is required for non-resident, non-Nordic travelers without a PIC",
+        path: [...path, "documentNumber"],
       });
-      return;
-    }
-
-    const isNordic = NORDIC_COUNTRIES.has(data.citizenship);
-
-    if (!data.isResidentInFinland && !isNordic) {
-      if (!data.countryOfEntryToFinland) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "countryOfEntryToFinland is required for non-resident, non-Nordic travelers",
-          path: [...path, "countryOfEntryToFinland"],
-        });
-      }
-      if (!data.documentNumber) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "documentNumber is required for non-resident, non-Nordic travelers",
-          path: [...path, "documentNumber"],
-        });
-      }
     }
   }
 }
@@ -154,20 +202,22 @@ export const payloadSchema = z
 
     for (let i = 0; i < data.people.length; i++) {
       const p = data.people[i]!;
-      const ageAtArrival = ageOn(p.dateOfBirth, data.arrivalDate);
+
+      // Identity (PIC-or-DOB) → derived birth date used for the age rules.
+      const birthDate = validateIdentity(p, ctx, ["people", i]);
+      const ageAtArrival = birthDate ? ageOn(birthDate, data.arrivalDate) : null;
 
       if (p.guestType === "primary" || p.guestType === "additional_adult") {
-        if (ageAtArrival < 18) {
+        if (ageAtArrival !== null && ageAtArrival < 18) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "Must be at least 18 years old on the arrival date",
             path: ["people", i, "dateOfBirth"],
           });
         }
-        // Adult-specific field validation (email/phone, citizenship, residency).
         validateAdultFields(p, ctx, ["people", i]);
       } else if (p.guestType === "child") {
-        if (ageAtArrival >= 18) {
+        if (ageAtArrival !== null && ageAtArrival >= 18) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "Child must be under 18 on the arrival date",

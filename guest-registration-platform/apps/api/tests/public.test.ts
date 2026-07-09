@@ -136,12 +136,12 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(cards[0]!.cardType).toBe("PRIMARY_WITH_ALLOWED_FAMILY");
     expect(cards[1]!.cardType).toBe("ADDITIONAL_ADULT_INDIVIDUAL");
 
-    // Country-of-entry persisted per card holder: primary supplied "SE"; the
-    // additional adult is an SE (Nordic) citizen with no country → explicit reason.
+    // Country-of-entry persisted per card holder: both are non-residents, so both
+    // must state it (no Nordic exemption in Tier 3B).
     expect(cards[0]!.countryOfEntryToFinland).toBe("SE");
     expect(cards[0]!.countryOfEntryNotApplicableReason).toBeNull();
-    expect(cards[1]!.countryOfEntryToFinland).toBeNull();
-    expect(cards[1]!.countryOfEntryNotApplicableReason).toBe("NORDIC_CITIZEN");
+    expect(cards[1]!.countryOfEntryToFinland).toBe("US");
+    expect(cards[1]!.countryOfEntryNotApplicableReason).toBeNull();
 
     // One PDF job enqueued per card.
     expect(testQueue.messages).toHaveLength(2);
@@ -405,6 +405,55 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     });
     expect(card!.countryOfEntryToFinland).toBeNull();
     expect(card!.countryOfEntryNotApplicableReason).toBe("RESIDENT_IN_FINLAND");
+  });
+
+  it("PIC path: encrypts the PIC, stores null DOB + HAS_FINNISH_PIC, and never logs the PIC", async () => {
+    const PIC = "120490-1235";
+    const { payload, signatures } = buildMultipartSubmission({
+      primaryOverrides: {
+        dateOfBirth: undefined,
+        citizenship: undefined,
+        documentNumber: undefined,
+        isResidentInFinland: false,
+        countryOfEntryToFinland: "SE",
+        finnishPersonalIdentityCode: PIC,
+      },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(201);
+
+    const guest = await testDb.guest.findFirst({ where: { tenantId: fx.tenantA.id } });
+    // DOB not persisted on the PIC path; derived in memory only.
+    expect(guest!.dateOfBirth).toBeNull();
+    // PIC is envelope-encrypted, never plaintext.
+    expect(guest!.finnishPersonalIdentityCodeEncrypted).not.toBeNull();
+    expect(guest!.finnishPersonalIdentityCodeEncrypted).not.toContain(PIC);
+    // A PIC holder needs no travel document — nothing stored, reason recorded.
+    expect(guest!.documentNumberEncrypted).toBeNull();
+    expect(guest!.documentNumberNotApplicableReason).toBe("HAS_FINNISH_PIC");
+
+    // The raw PIC never appears in any audit row.
+    const audits = await testDb.auditLog.findMany();
+    for (const audit of audits) {
+      expect(JSON.stringify(audit)).not.toContain(PIC);
+    }
+  });
+
+  it("Nordic non-resident: records NORDIC_CITIZEN and stores no document number", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      primaryOverrides: {
+        isResidentInFinland: false,
+        citizenship: "SE",
+        countryOfEntryToFinland: "SE",
+        documentNumber: "SHOULD-NOT-PERSIST",
+      },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(201);
+
+    const guest = await testDb.guest.findFirst({ where: { tenantId: fx.tenantA.id } });
+    expect(guest!.documentNumberEncrypted).toBeNull();
+    expect(guest!.documentNumberNotApplicableReason).toBe("NORDIC_CITIZEN");
   });
 
   it("400 when a non-resident, non-Nordic card holder omits country of entry", async () => {

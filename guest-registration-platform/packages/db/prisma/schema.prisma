@@ -193,7 +193,7 @@ model PassengerCard {
   cardNumber              Int
   cardType                String
   countryOfEntryToFinland String?
-  /// Explicit reason the country-of-entry is blank: NORDIC_CITIZEN | RESIDENT_IN_FINLAND.
+  /// Explicit reason the country-of-entry is blank: RESIDENT_IN_FINLAND (no Nordic exemption).
   countryOfEntryNotApplicableReason String?
   cardHolderName          String?
   cardHolderEmail         String?
@@ -228,13 +228,17 @@ model Guest {
   roleOnCard                           String
   firstName                            String
   lastName                             String
-  dateOfBirth                          DateTime @db.Date
+  /// Nullable: persisted only when the guest is identified by date of birth. On
+  /// the PIC path the birthdate is derived in memory and never stored here.
+  dateOfBirth                          DateTime? @db.Date
   citizenship                          String?
   isResidentInFinland                  Boolean?
   address                              String?
   documentType                         String?
   /// Envelope-encrypted JSON blob (see @gr/crypto encryptString). Never plaintext.
   documentNumberEncrypted              String?
+  /// Reason the document number is blank: RESIDENT_IN_FINLAND | HAS_FINNISH_PIC | NORDIC_CITIZEN.
+  documentNumberNotApplicableReason    String?
   /// Envelope-encrypted Finnish Personal Identity Code. Never plaintext.
   finnishPersonalIdentityCodeEncrypted String?
   email                                String?
