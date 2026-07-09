@@ -1,3 +1,44 @@
+import { ACTIVE_FORM_REQUIREMENT_VERSION } from "@gr/shared";
+
+/** Hosts that must never front a production public URL (SSRF / capability-URL leakage). */
+function isDisallowedProdHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  if (h === "127.0.0.1" || h.startsWith("127.") || h === "::1" || h === "[::1]") return true;
+  if (h === "0.0.0.0") return true;
+  // RFC 1918 / link-local / unique-local private ranges.
+  if (/^10\./.test(h)) return true;
+  if (/^192\.168\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  if (/^169\.254\./.test(h)) return true;
+  if (/^f[cd][0-9a-f]{2}:/.test(h) || h.startsWith("[fc") || h.startsWith("[fd")) return true;
+  return false;
+}
+
+/**
+ * PUBLIC_APP_URL is the origin of the secret registration capability URLs, so a
+ * misconfiguration is a security bug, not a cosmetic one. It must parse, and in
+ * production it must be an external HTTPS origin — never http, localhost, or a
+ * private/link-local host.
+ */
+function validatePublicAppUrl(raw: string, isProd: boolean): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("PUBLIC_APP_URL must be a valid absolute URL");
+  }
+  if (isProd) {
+    if (url.protocol !== "https:") {
+      throw new Error("PUBLIC_APP_URL must use https in production");
+    }
+    if (isDisallowedProdHost(url.hostname)) {
+      throw new Error("PUBLIC_APP_URL must be a public host in production (no localhost/private IP)");
+    }
+  }
+  return raw;
+}
+
 export type ApiConfig = {
   port: number;
   jwtSecret: string;
@@ -70,6 +111,26 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   if (rawTrustProxy === "1") trustProxy = 1;
   else if (rawTrustProxy === "true") trustProxy = true;
 
+  const publicAppUrl = validatePublicAppUrl(env.PUBLIC_APP_URL ?? "http://localhost:5173", isProd);
+
+  // Fail closed on legal status: the active requirement version must be
+  // LEGAL_APPROVED unless explicitly waived. The waiver defaults ON in
+  // production, so shipping a draft template requires a deliberate opt-out
+  // (REQUIRE_LEGAL_APPROVED_REQUIREMENTS=false), never silence.
+  const requireLegalApproved = env.REQUIRE_LEGAL_APPROVED_REQUIREMENTS
+    ? env.REQUIRE_LEGAL_APPROVED_REQUIREMENTS === "true"
+    : isProd;
+  if (
+    requireLegalApproved &&
+    ACTIVE_FORM_REQUIREMENT_VERSION.reviewStatus !== "LEGAL_APPROVED"
+  ) {
+    throw new Error(
+      `Active form requirement ${ACTIVE_FORM_REQUIREMENT_VERSION.id} is ` +
+        `${ACTIVE_FORM_REQUIREMENT_VERSION.reviewStatus}, not LEGAL_APPROVED. ` +
+        "Set REQUIRE_LEGAL_APPROVED_REQUIREMENTS=false to run on a draft template.",
+    );
+  }
+
   return {
     port: Number(env.PORT ?? 3000),
     jwtSecret,
@@ -80,7 +141,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     allowBearerOwnerAuth,
     ownerAuthCookieName: env.OWNER_COOKIE_NAME ?? "gr_owner_session",
     ownerCookieSecure,
-    publicAppUrl: env.PUBLIC_APP_URL ?? "http://localhost:5173",
+    publicAppUrl,
     retentionDefaultDays: Number(env.RETENTION_DEFAULT_DAYS ?? 365),
     retentionGraceDays: 30,
     rateLimitEnabled: env.NODE_ENV !== "test",

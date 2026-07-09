@@ -1183,3 +1183,251 @@ one), GitHub Actions SHA-pinning + `permissions: contents: read`, Redis
 host-exposure in dev compose, container image digest pinning, and moving Prisma
 `migrate deploy` off the API container's startup path before running multiple
 replicas.
+
+---
+
+# Tier 3 — Compliance-Hardened MVP Polish (sliced)
+
+> **Status: ✅ Done.** All five slices are implemented and merged in order — 3A (requirement
+> engine + data-minimized strict schema), 3B (Finnish PIC engine + conditional fields), 3C (CSRF
+> for owner mutations), 3D (active registration link lifecycle + QR), 3E (draft-template PDF
+> filling + docs/config hardening). The shipped form requirement is
+> `FI-TEM-PASSENGER-CARD-2026-DRAFT-V1` (`reviewStatus: LEGAL_REVIEW_PENDING`) — a **draft**
+> pending human legal sign-off (invariant 10); production fails closed on a non-`LEGAL_APPROVED`
+> version unless `REQUIRE_LEGAL_APPROVED_REQUIREMENTS=false`. See `docs/pdf-generation.md`. Legal
+> correctness of the Finnish requirement itself remains a Tier 4 / human task.
+
+> Supersedes the earlier "Tier 3 — MVP polish" bullet. The original three items shrank
+> (unicode font already done; `countryOfResidence` explicitly not built; email/phone/documentType
+> removed as data minimization) and the remaining work grew into a compliance-hardening effort that
+> is **too large and too security-sensitive for one PR**. It is split into five independently
+> reviewable slices (3A–3E); each ships on its own and **3C must land before 3D**.
+
+## Context
+
+Findings that shrink scope:
+- **Unicode PDF font is already done** (`packages/pdf/src/registrationPdf.ts` embeds DejaVu via
+  fontkit; `packages/pdf/tests/registrationPdf.test.ts:79-86` proves Vietnamese/Nordic names render).
+  **Dropped.**
+- **`countryOfResidence` is NOT built** — removed as data minimization (confirmed).
+- **email / phone / documentType are NOT collected** (confirmed).
+
+Legacy `backend/` tree is deleted — nothing to port.
+
+### The legal-review gate (central constraint — CLAUDE.md invariant 10)
+
+Legal correctness of the requirement fields is a **human sign-off task**, not a code assertion. Today
+that is a single placeholder `REQUIREMENT_VERSION = "FI-ACCOMMODATION-2026-01"`
+(`packages/shared/src/constants.ts:10`, `TODO(legal)`). Tier 3 evolves it into a **versioned,
+review-gated requirement engine**:
+
+- A `FormRequirementVersion` config carries `reviewStatus`:
+  `"DRAFT" | "LEGAL_REVIEW_PENDING" | "LEGAL_APPROVED" | "DEPRECATED"`.
+- Initial `TEM_2026_DRAFT_V1` ships `LEGAL_REVIEW_PENDING` with `sourceUrl` / `sourceName` / `notes`
+  recording it is an engineering interpretation only. Per-field `requirementType` is one of
+  `PRODUCT_RULE | LEGAL_INTERPRETATION_PENDING | DATA_MINIMIZATION`.
+- Backend validation, web form, PDF field mapping, and tests all consume this **one** config — TEM
+  assumptions are never scattered across Zod/React/PDF/worker code.
+- **Production defaults to secure:** `REQUIRE_LEGAL_APPROVED_REQUIREMENTS` **defaults to `true` when
+  `NODE_ENV=production`**; it must be set explicitly `false` for demo/staging. When required and the
+  active version is not `LEGAL_APPROVED`, the API refuses to start.
+- Owner/guest copy says "Passenger card draft generated from configured template. Legal / compliance
+  verification pending." — never "official", "authority-ready", or "legally compliant".
+- Legal sign-off (Tier 4) mints a **new** `TEM_2026_APPROVED_V1`; the draft is never re-labelled.
+
+## Tier 3A — Requirement engine + data-minimized strict schema
+
+**New** `packages/shared/src/form-requirements/temPassengerCard.v1.ts` — the central
+`TEM_2026_DRAFT_V1` (reviewStatus, source, per-field requirementType / requiredWhen /
+notApplicableReasons). Evolve `REQUIREMENT_VERSION` (`constants.ts:10`) to reference this version's
+`id`; keep the AAD-stamped string stable-per-version (invariant 3 — do not loosen AAD; a version
+change is a new value, never a mutated one).
+
+**Remove `documentType`**: drop from `packages/shared/src/schemas/registration.ts:26` and
+`apps/api/src/domain/submissionSchema.ts:25`; stop writing `Guest.documentType`
+(`schema.prisma:236`, leave nullable column).
+
+**Remove email/phone**: delete the inputs from the web form; drop from `adultBaseObject`
+(`submissionSchema.ts:30-31`) and the "at least one of email/phone" refinement
+(`submissionSchema.ts:68-74`); stop writing `Guest.email` / `Guest.phoneE164`
+(`schema.prisma:240-241`) and the submission-level card-holder contact columns. Leave nullable columns;
+note a targeted deletion/anonymization migration is needed **iff** real production contact data exists
+(none in dev).
+
+**Strict payload**: `payloadSchema` is already `.strict()` (`submissionSchema.ts:129`); the removals
+above mean unknown-key rejection now covers email/phone/countryOfResidence/documentType and any
+spouse/child document/entry/signature keys. Add explicit tests asserting each is rejected.
+
+**Text handling (not "sanitization")**: a shared helper that **normalizes + validates + length-limits**
+names/address/documentNumber/PIC — trim, Unicode NFC, reject ASCII control chars (except normal
+whitespace), collapse whitespace runs, per-field max (names 100, address 300, documentNumber 80,
+PIC 32). A `<script` / `javascript:` / `data:text/html` / null-byte reject is **defense in depth**, not
+the primary control — the real protection is text-only rendering (React escaping, pdf-lib `drawText`);
+never `dangerouslySetInnerHTML` for user data.
+
+**Tests:** removed fields rejected; strict schema behavior; text normalization/length limits; unicode
+accepted, script/null-byte rejected.
+
+## Tier 3B — Finnish PIC engine + official conditional fields
+
+**New** Finnish PIC (henkilötunnus) helper in `packages/shared`: format + checksum validation and
+birthdate derivation (century marker + control char). Reject invalid before any storage/encryption;
+never log the PIC.
+
+**PIC-vs-DOB exactly-one** per person: accept PIC-only or DOB-only; reject both or neither. Make
+`Guest.dateOfBirth` **nullable** (currently `DateTime @db.Date` non-null → migration).
+`finnishPersonalIdentityCodeEncrypted` already exists and stays envelope-encrypted (invariant 2).
+**DOB is persisted only on the DOB path**; on the PIC path, derive DOB **in memory** for age
+validation / PDF and do **not** persist it unless product/legal later requires it.
+UI copy: "Finnish personal identity code, if available; otherwise date of birth." — do not nudge
+non-Finnish guests to invent a national ID.
+
+**Child age (< 18 on arrivalDate)** from DOB or PIC-derived birthdate; parser failure → reject. No
+spouse age rule (MVP).
+
+**Conditional fields** driven by the config, not scattered literals (reuse `NORDIC_CITIZENSHIPS`,
+`constants.ts:23`):
+- `documentNumber` required only when `!Nordic(citizenship) && !isResidentInFinland`; else not
+  collected + internal `documentNumberNotApplicableReason` (`NORDIC_CITIZEN` / `RESIDENT_IN_FINLAND`).
+  Encrypted at rest (invariant 2). Spouse/child never carry it.
+- `countryOfEntryToFinland` required when `!isResidentInFinland` (no Nordic exemption); else
+  `countryOfEntryNotApplicableReason = RESIDENT_IN_FINLAND`.
+- `purposeOfStay` mandatory **product rule** (config `PRODUCT_RULE` + note that TEM marks it
+  non-compulsory). Enum reuses `PURPOSES_OF_STAY` (`constants.ts:16`); no free text. First accepted
+  adult card sets `GuestSubmission.purposeOfStay`; later cards must match.
+
+**CountrySelect + known-country validation** for nationality and country-of-entry only. Add shared
+`COUNTRY_CODES` + `normalizeCountryCode` / `isKnownCountryCode` / `countryNameFromCode`
+(`Intl.DisplayNames`). Storage/API/fingerprint = ISO alpha-2; guest UI = flag + localized name; PDF =
+full English name. Reject unknown codes.
+
+**Tests:** PIC valid/invalid-format/invalid-checksum/derived-DOB/never-logged/encrypted; PIC+DOB and
+neither rejected; child <18 accepted (both paths) / 18+ rejected; three residency×nationality combos
+for documentNumber and countryOfEntry; not-applicable reasons stored internally; spouse/child
+doc+entry rejected; CountrySelect ISO round-trip; lowercase normalized; XX rejected.
+
+## Tier 3C — CSRF for owner mutations (prerequisite slice)
+
+**Ship CSRF on its own, before the link endpoint** — it touches session/auth behavior app-wide, so it
+must not share a commit with new features (if login/session breaks, isolate the cause).
+
+- Add CSRF middleware and migrate **all existing owner state-changing routes** (owner-user mutations,
+  logout, etc.) to require it.
+- CSRF token is **never** stored in localStorage; it is issued via `/me` (or a dedicated `/csrf`
+  endpoint) and sent back as an `X-CSRF-Token` header. Keep the session cookie httpOnly +
+  `SameSite=Strict` (already set, `apps/api/src/routes/ownerAuth.ts:22,105`) + Secure in production.
+- **Tests:** each owner mutation rejects a missing/invalid CSRF token with 403; a valid token succeeds;
+  existing owner-UI flows keep working.
+
+## Tier 3D — Active registration link lifecycle + QR
+
+**Endpoint** `POST /v1/owner/properties/:propertyId/active-registration-link` in
+`apps/api/src/routes/ownerProperties.ts` (router/`AppDeps` pattern, `ownerProperties.ts:5`):
+- `requireRole(deps, "OWNER", "MANAGER")` (`apps/api/src/middleware/rbac.ts:14`) — VIEWER 403 (writes
+  the Tier-1 `UNAUTHORIZED_ACCESS_ATTEMPT`) and **cannot** generate/reveal/replace a link. CSRF
+  required (from 3C).
+- Tenant-scoped property lookup (`findFirst` + `tenantId`, 404 on miss/foreign, per
+  `ownerProperties.ts:36-43`).
+- Request `{ arrivalDate, departureDate, maxPassengerCards?, linkTtlHours? }`:
+  `departureDate >= arrivalDate` (same-day ok); `maxPassengerCards` int 1..20 (default 20);
+  `linkTtlHours ∈ {24,48,72,168}` (default 48); `expiresAt = createdAt + linkTtlHours*3600_000`. No
+  direct `expiresAt`, no non-expiring links.
+- **Transaction:** revoke prior `ACTIVE` links; prior OPEN-empty submission → `EXPIRED`, prior
+  OPEN-submitted → `CLOSED`; create new `RegistrationLink ACTIVE` + new `GuestSubmission OPEN` carrying
+  arrival/departure/maxPassengerCards.
+- **Concurrency:** rely on a partial unique index (below). On unique violation → **409
+  `active_link_conflict`**, return **no URL**, and write **no** audit event.
+  `REGISTRATION_LINK_REGENERATED` is written **only after successful creation**.
+- Token via `generateRegistrationToken()` / `hashRegistrationToken()`
+  (`packages/crypto/src/tokens.ts:8,12`). URL via
+  `new URL(`/registration/${rawToken}`, config.publicAppUrl)`.
+- Response `{ url, createdAt, expiresAt, linkTtlHours }`; headers `Cache-Control: no-store` +
+  `Pragma: no-cache`; body never logged.
+- **Audit metadata** (counts + ids only, invariant 6): `{ propertyId, newGuestSubmissionId,
+  previousActiveRevokedCount, previousEmptyExpiredCount, previousSubmittedClosedCount, expiresAt,
+  linkTtlHours }` — **no token / hash / url / QR**.
+
+**Migrations:** partial unique index
+`CREATE UNIQUE INDEX "registration_link_one_active_per_property" ON "RegistrationLink"("propertyId") WHERE "status" = 'ACTIVE';`
+and add `REGISTRATION_LINK_REGENERATED` to the `AuditAction` enum (`schema.prisma:63-82`).
+
+**Rate limit** keyed by **`tenantId + propertyId`** (damage is property-level, not actor-level):
+5 replacements / property / hour; OWNER and MANAGER share the limit; VIEWER 403s do **not** consume
+quota. Redis store if configured, else a transactionally-safe DB/audit count scoped to the property.
+
+**Link-usability rule** (public): usable only when link `ACTIVE` AND `expiresAt > now` AND submission
+`OPEN` AND tenant `ACTIVE`. Any failure → one generic guest message ("This registration link is no
+longer active. Please contact your host for a new link.") — never disclose which condition failed.
+
+**Web (`apps/web/src/owner/OwnerPropertiesPage.tsx`):** OWNER/MANAGER-only "Create / replace
+registration link" button (VIEWER hidden; active-link metadata visibility otherwise follows existing
+property/submission RBAC). Confirmation modal must show **current arrival/departure + current card
+count** and state "This closes the current registration session and disables the old link." Modal
+collects arrival/departure/maxPassengerCards/linkTtlHours. Success panel: one-time URL + copy +
+client-side QR (new `qrcode` dep, pure-JS; `allowBuilds` only if it needs a build step) + PNG download
+with a **neutral sanitized filename `registration-link-qr.png`** (no guest/property/token/date/id) +
+"Save this link now. It will not be shown again." State lives in React memory only — cleared on
+dismiss/route change; never localStorage/sessionStorage/analytics. After refresh the card shows only
+status/arrival/departure/expiresAt/card-count — never raw URL/QR/hash. Use `apiPost`
+(`apps/web/src/api/client.ts:29`).
+
+**Tests:** OWNER/MANAGER succeed; VIEWER 403 + `UNAUTHORIZED_ACCESS_ATTEMPT` (no quota consumed);
+missing CSRF 403; foreign property 404; response `no-store`; DB stores `tokenHash` only; audit has no
+token/url/hash; old active→REVOKED, empty→EXPIRED, submitted→CLOSED; new link ACTIVE + submission OPEN;
+**partial unique index blocks a second ACTIVE → 409 with no URL and no audit row**; rate limit
+5/property/hour; public usability for ACTIVE+future+OPEN vs past-expiry/REVOKED/EXPIRED/CLOSED.
+
+## Tier 3E — Draft template PDF filling + docs/config hardening
+
+Currently `packages/pdf/src/registrationPdf.ts` draws a custom layout via `drawField`. This slice
+fills a **draft template** for the active `FormRequirementVersion`:
+- **Do not ship the official TEM PDF asset in production until licensing / right-to-use is confirmed
+  (Tier 4).** Tier 3 uses a **draft internal template based on the reviewed field mapping**; if a TEM
+  PDF is committed for reference, docs must mark it **draft / reference only, not legally approved**.
+- Load the template; fill AcroForm fields if present, else overlay text at coordinates. Keep the
+  embedded DejaVu font, place the signature image, flatten, then encrypt final bytes (invariants 1-3:
+  plaintext PDF only in memory, fresh DEK per doc, AAD binds context).
+- **One PDF per adult PassengerCard**; spouse/children ride on the holder's card (surname / given
+  names / PIC-or-DOB only).
+- Field mapping lives in the config: surname, given names, PIC-or-DOB, nationality (full name),
+  address, passport/ID no. (blank when N/A), spouse/minor rows, arrival, departure, country-of-entry
+  (full name, blank when resident), purpose, signature, provider name/ID/address. **Never render**
+  email, phone, countryOfResidence, documentType, internal not-applicable reasons, or token/audit data.
+- Thread fields through the worker mapper (`apps/worker/src/generatePdfForPassengerCard.ts`).
+
+**Config/secret hardening:** `PUBLIC_APP_URL` must parse via `new URL()`; production rejects non-HTTPS,
+`localhost`/`127.0.0.1`/private hosts, weak `JWT_SECRET` / `FINGERPRINT_PEPPER`, missing Redis when
+rate limiting needs it, and a non-`LEGAL_APPROVED` active version when
+`REQUIRE_LEGAL_APPROVED_REQUIREMENTS` (default true in production) is on. Confirm the raw token/URL is
+returned once, `no-store`, never logged/stored-raw/audited (DB holds `tokenHash` only).
+
+**Docs:** update `future-implementation.md`, `api.md`, `data-model.md`, `architecture.md`,
+`threat-model.md`, the privacy notice, and a new `docs/pdf-generation.md`, stating: Tier 3 follows the
+TEM model as a **draft** (`LEGAL_REVIEW_PENDING`); email/phone/countryOfResidence/documentType not
+collected; purpose mandatory by product rule (not legal claim); passenger-card data not used for
+customer service or direct marketing; raw registration URLs are secret capability URLs; one property =
+one active link.
+
+**Tests:** template asset loads; one PDF per adult card; fields map; unicode names + signature render;
+field 6 blank when N/A; field 12 blank when resident; email/phone/countryOfResidence/documentType
+absent; **stored blob does not start with `%PDF-`** (encrypted); config guard rejects bad
+`PUBLIC_APP_URL` and a non-approved version in production; plus a manual visual template comparison.
+
+## Verification
+
+- `pnpm lint && pnpm typecheck && pnpm test` at the monorepo root (needs the docker DB up). Test
+  **behavior against the draft config**, never "legal correctness" (no test named "complies with
+  Finnish law"). Update the shared multipart payload builder (`apps/api/tests/helpers/*`) first so
+  existing suites keep passing, then add the per-slice tests above.
+- Manual smoke (after 3D+3E): owner login → create active link → QR renders → guest opens link →
+  submit non-Nordic-non-resident (documentNumber + country-of-entry), Nordic-non-resident (no doc,
+  entry required), resident-in-Finland (neither), plus spouse/children → download PDFs → verify
+  draft-template fields → replace link (confirm modal shows current arrival/departure + card count) →
+  old link unavailable → audit rows present (`REGISTRATION_LINK_REGENERATED` with no token/url,
+  submission, PDF generated/downloaded).
+
+## Suggested PR order
+
+3A (requirement engine + minimization) → 3B (PIC + conditional fields) → 3C (CSRF) → 3D (active link +
+QR) → 3E (draft PDF template + docs/config hardening). Each is a separate reviewable PR; **3C must land
+before 3D.**

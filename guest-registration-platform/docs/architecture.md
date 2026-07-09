@@ -3,9 +3,10 @@
 ## Overview
 
 A multi-tenant compliance record system for accommodation providers in Finland. Guests submit
-registration details through a unique link; the backend produces an authority-ready PDF,
-encrypts it with envelope encryption, and stores only ciphertext. Property owners access
-submissions and decrypted PDFs through an audited, role-gated dashboard.
+registration details through a unique link; the backend produces a passenger card PDF from a
+**draft template** (legal review pending — see `docs/pdf-generation.md` and CLAUDE.md
+invariant 10), encrypts it with envelope encryption, and stores only ciphertext. Property
+owners access submissions and decrypted PDFs through an audited, role-gated dashboard.
 
 ## Monorepo layout
 
@@ -18,7 +19,8 @@ packages/
   shared/   Zod schemas + constants used by web and api
   db/       Prisma schema, client singleton, audit writer, seed script
   crypto/   KMS abstraction, envelope encryption, token hashing
-  pdf/      pdf-lib PDF renderer (pure function, in-memory only)
+  pdf/      pdf-lib draft-template renderer + pure TEM field mapper (in-memory only)
+  queue/    QueueProvider abstraction (in-process now → Service Bus)
   storage/  StorageProvider abstraction + local filesystem provider
 ```
 
@@ -31,14 +33,23 @@ without rewriting job logic.
 ### Guest submission
 1. `GET /v1/public/registration-links/:token` — token is SHA-256-hashed and looked up;
    only safe property info is returned.
-2. `POST .../submissions` — Zod validation → submission + guest rows created (document
-   numbers envelope-encrypted before insert) → audit `GUEST_REGISTRATION_SUBMITTED` →
-   PDF job runs: generate → AES-256-GCM encrypt (fresh DEK + IV, AAD binds
-   tenant/property/submission/requirementVersion) → DEK wrapped by KMS → ciphertext to
-   storage → `EncryptedPdf` row → status `PDF_READY` → audit `PDF_GENERATED`.
+2. `POST .../submissions` — Zod (`.strict`) validation → one `PassengerCard` per adult with
+   guest + signature rows (document numbers, PICs, signatures envelope-encrypted before
+   insert) added to the open stay → audit `PASSENGER_CARD_SUBMITTED` → one PDF job **per
+   card** runs: render draft template → AES-256-GCM encrypt (fresh DEK + IV, AAD binds
+   tenant/property/batch/card + requirementVersion) → DEK wrapped by KMS → ciphertext to
+   storage → `EncryptedPdf` row → card status `PDF_READY` → audit `PDF_GENERATED`. See
+   `docs/pdf-generation.md`.
+
+### Owner active-link regeneration
+Cookie (or Bearer) auth → CSRF check for cookie sessions → tenant-scoped property fetch →
+RBAC (OWNER/MANAGER) → rate limit (5/property/hour) → transaction retires the prior ACTIVE
+link + open stays and creates a new ACTIVE link + OPEN stay (partial unique index enforces
+one active link) → audit `REGISTRATION_LINK_REGENERATED` (counts/ids only) → the secret
+capability URL is returned once with `no-store`; only its `tokenHash` is persisted.
 
 ### Owner download
-JWT auth → DB re-check of user/tenant status → tenant-scoped submission fetch → RBAC
+Cookie or Bearer auth → DB re-check of user/tenant status → tenant-scoped card fetch → RBAC
 (OWNER/MANAGER only) → blob fetched → ciphertext sha256 verified → AAD rebuilt from the row
 and compared → DEK unwrapped → decrypt → streamed to client with `no-store` → audit
 `OWNER_DOWNLOADED_PDF`.
@@ -56,8 +67,12 @@ another tenant's PDF under the wrong context.
 - `KmsProvider` (packages/crypto) → Azure Key Vault wrap/unwrap (RSA-OAEP-256).
 - `StorageProvider` (packages/storage) → Azure Blob Storage.
 - `apps/worker` job entry points → Azure Service Bus consumers.
+- `QueueProvider` (packages/queue) → Azure Service Bus consumers.
 - `requirementVersion` on every submission and inside the AAD → future Finnish requirement
-  changes create a new version; old records remain interpretable.
+  changes create a new version; old records remain interpretable. The active version
+  (`ACTIVE_FORM_REQUIREMENT_VERSION` in `@gr/shared`) carries a `reviewStatus`; production
+  refuses to start on a non-`LEGAL_APPROVED` version unless `REQUIRE_LEGAL_APPROVED_REQUIREMENTS`
+  is explicitly waived (see `docs/pdf-generation.md`).
 
 ## Local development
 

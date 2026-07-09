@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont, type PDFImage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import { mapCardToTemFields, type TemField } from "./temFieldMap.js";
 
 // Bundled DejaVu Sans covers Latin Extended Additional (Vietnamese) and the
 // Nordic characters (å ä ö ø) that the WinAnsi standard fonts mangle to "?".
@@ -59,7 +60,8 @@ const BODY_SIZE = 10;
 const LINE_HEIGHT = 15;
 
 /**
- * Renders one authority-ready passenger card PDF entirely in memory.
+ * Renders one draft passenger card PDF entirely in memory from a configured
+ * template (legal review pending — see CLAUDE.md invariant 10).
  * The returned bytes must never be written to disk unencrypted.
  */
 export async function generateRegistrationPdf(input: RegistrationCardPdfInput): Promise<Uint8Array> {
@@ -90,26 +92,7 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
     y -= LINE_HEIGHT;
   };
 
-  const drawField = (label: string, value: string) => {
-    newPageIfNeeded(LINE_HEIGHT);
-    page.drawText(clean(`${label}:`), {
-      x: MARGIN,
-      y,
-      size: BODY_SIZE,
-      font: bold,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-    page.drawText(clean(value), {
-      x: MARGIN + 160,
-      y,
-      size: BODY_SIZE,
-      font,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-    y -= LINE_HEIGHT;
-  };
-
-  const drawSectionRule = (_page: PDFPage) => {
+  const drawSectionRule = () => {
     newPageIfNeeded(LINE_HEIGHT);
     page.drawLine({
       start: { x: MARGIN, y: y + 4 },
@@ -120,74 +103,72 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
     y -= 8;
   };
 
+  // Render numbered fields as "n  Label: value"; a blank value keeps the field
+  // present (an intentionally empty box) so the draft card layout stays stable.
+  const drawTemField = (field: TemField) => {
+    newPageIfNeeded(LINE_HEIGHT);
+    page.drawText(clean(`${field.no}  ${field.label}:`), {
+      x: MARGIN,
+      y,
+      size: BODY_SIZE,
+      font: bold,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+    page.drawText(clean(field.value), {
+      x: MARGIN + 200,
+      y,
+      size: BODY_SIZE,
+      font,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+    y -= LINE_HEIGHT;
+  };
+
+  const fields = mapCardToTemFields(input);
+
   drawText("Passenger Registration Card", { font: bold, size: 18 });
-  y -= 4;
+  y -= 2;
+  // Never claim this is an official / authority-ready / legally-compliant form
+  // (CLAUDE.md invariant 10). It is a draft generated from a configured template.
+  drawText("DRAFT — generated from a configured template; legal review pending.", {
+    font: bold,
+    size: 9,
+  });
   drawText(`Card ${input.cardNumber} — ${cardTypeLabel(input.cardType)}`, { size: 9 });
   drawText(`Requirement version: ${input.requirementVersion}`, { size: 9 });
   drawText(`Card ID: ${input.passengerCardId}`, { size: 9 });
   drawText(`Batch ID: ${input.guestSubmissionId}`, { size: 9 });
   y -= 8;
 
-  drawText("Accommodation Provider", { font: bold, size: 12 });
-  drawSectionRule(page);
-  drawField("Property", input.property.name);
-  const addressParts = [
-    input.property.addressLine1,
-    input.property.addressLine2 ?? "",
-    `${input.property.postalCode} ${input.property.city}`,
-    input.property.countryCode,
-  ].filter((part) => part.trim().length > 0);
-  drawField("Address", addressParts.join(", "));
-  if (input.property.businessId) {
-    drawField("Business ID", input.property.businessId);
-  }
-  y -= 8;
-
-  drawText("Stay", { font: bold, size: 12 });
-  drawSectionRule(page);
-  drawField("Arrival date", input.arrivalDate);
-  drawField(
-    "Departure date",
-    input.departureDateKnown && input.departureDate ? input.departureDate : "Not known at submission",
-  );
-  drawField("Purpose of stay", input.purposeOfStay || "—");
-  y -= 8;
-
   drawText("Card Holder", { font: bold, size: 12 });
-  drawSectionRule(page);
-  const h = input.cardHolder;
-  drawField("Name", `${h.firstName} ${h.lastName}`);
-  // Identity is PIC-or-DOB: render whichever the guest provided.
-  if (h.dateOfBirth) drawField("Date of birth", h.dateOfBirth);
-  if (h.finnishPersonalIdentityCode) drawField("Finnish PIC", h.finnishPersonalIdentityCode);
-  if (h.citizenship) drawField("Citizenship", h.citizenship);
-  drawField("Resident in Finland", h.isResidentInFinland ? "Yes" : "No");
-  if (h.address) drawField("Address", h.address);
-  drawField(
-    "Country of entry",
-    input.countryOfEntryToFinland ?? countryExceptionLabel(input.countryOfEntryNotApplicableReason),
-  );
-  if (h.documentNumber) drawField("Document number", h.documentNumber);
+  drawSectionRule();
+  fields.holder.forEach(drawTemField);
   y -= 8;
 
-  if (input.accompanying.length > 0) {
-    drawText("Accompanying Persons", { font: bold, size: 12 });
-    drawSectionRule(page);
-    input.accompanying.forEach((person) => {
-      const identity = person.dateOfBirth
-        ? `b. ${person.dateOfBirth}`
-        : person.finnishPersonalIdentityCode
-          ? `PIC ${person.finnishPersonalIdentityCode}`
-          : "";
-      const suffix = identity ? ` (${identity})` : "";
-      drawField(personRoleLabel(person.roleOnCard), `${person.firstName} ${person.lastName}${suffix}`);
+  if (fields.family.length > 0) {
+    drawText("Accompanying Persons (spouse / minor children)", { font: bold, size: 12 });
+    drawSectionRule();
+    fields.family.forEach((rider) => {
+      const identity = rider.identity ? ` (${rider.identity})` : "";
+      drawTemField({
+        no: rider.no,
+        key: "familyRider",
+        label: "Name",
+        value: `${rider.surname} ${rider.givenNames}${identity}`.trim(),
+      });
     });
     y -= 8;
   }
 
-  // Signature: draw image scaled to a fixed box, then the signed timestamp.
-  drawText("Signature", { font: bold, size: 12 });
-  drawSectionRule(page);
+  drawText("Entry & Stay", { font: bold, size: 12 });
+  drawSectionRule();
+  drawTemField(fields.countryOfEntry);
+  fields.stay.forEach(drawTemField);
+  y -= 8;
+
+  // Signature (field 16): draw image scaled to a fixed box, then the timestamp.
+  drawText("16  Signature", { font: bold, size: 12 });
+  drawSectionRule();
   const png: PDFImage = await doc.embedPng(input.signaturePng);
   const boxW = 200;
   const scaled = png.scaleToFit(boxW, 80);
@@ -197,8 +178,13 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
   drawText(`Signed: ${input.signedAt.toISOString()}`, { size: 9 });
   y -= 8;
 
+  drawText("Accommodation Provider", { font: bold, size: 12 });
+  drawSectionRule();
+  fields.provider.forEach(drawTemField);
+  y -= 8;
+
   drawText("Confirmation", { font: bold, size: 12 });
-  drawSectionRule(page);
+  drawSectionRule();
   drawText("The card holder confirmed the accuracy of the provided information and accepted the");
   drawText("privacy notice at the time of submission.");
   y -= 8;
@@ -210,18 +196,6 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
 function cardTypeLabel(cardType: string): string {
   if (cardType === "ADDITIONAL_ADULT_INDIVIDUAL") return "Additional adult";
   return "Primary + family";
-}
-
-function personRoleLabel(role: string): string {
-  if (role === "SPOUSE") return "Spouse";
-  if (role === "MINOR_CHILD") return "Minor child";
-  return role;
-}
-
-function countryExceptionLabel(reason: string | null): string {
-  if (reason === "NORDIC_CITIZEN") return "N/A (Nordic citizen)";
-  if (reason === "RESIDENT_IN_FINLAND") return "N/A (resident in Finland)";
-  return "—";
 }
 
 /** Strip control characters that would break layout; the embedded font handles the rest. */

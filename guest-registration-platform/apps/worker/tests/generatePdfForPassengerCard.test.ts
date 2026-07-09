@@ -225,7 +225,10 @@ describe("generatePdfForPassengerCard", () => {
     // Distinct blobs per card, both present in storage.
     expect(pdf1!.blobPath).not.toBe(pdf2!.blobPath);
     expect(pdf1!.blobPath).toContain(card1);
-    await expect(storage.getObject({ path: pdf1!.blobPath })).resolves.toBeDefined();
+    const storedBlob = await storage.getObject({ path: pdf1!.blobPath });
+    expect(storedBlob).toBeDefined();
+    // Invariant 1: only ciphertext hits storage — the blob must NOT be a plaintext PDF.
+    expect(storedBlob.subarray(0, 5).toString("ascii")).not.toBe("%PDF-");
 
     // AAD binds ciphertext to both the batch and the specific card.
     const aad1 = JSON.parse(pdf1!.aadJson);
