@@ -7,6 +7,7 @@ import { errorHandler } from "./middleware/error.js";
 import { requestId } from "./middleware/requestId.js";
 import { requestLog } from "./middleware/requestLog.js";
 import { requireOwnerAuth } from "./middleware/auth.js";
+import { requireCsrf } from "./middleware/csrf.js";
 import { healthRoutes } from "./routes/health.js";
 import { ownerAuthRoutes } from "./routes/ownerAuth.js";
 import { ownerPropertyRoutes } from "./routes/ownerProperties.js";
@@ -37,10 +38,13 @@ export function buildApp(deps: AppDeps): Express {
   app.use("/v1/owner/auth", ownerAuthRoutes(deps));
 
   const ownerAuth = requireOwnerAuth(deps);
-  app.use("/v1/owner/properties", ownerAuth, ownerPropertyRoutes(deps));
-  app.use("/v1/owner/submissions", ownerAuth, ownerSubmissionRoutes(deps));
-  app.use("/v1/owner/passenger-cards", ownerAuth, ownerPassengerCardRoutes(deps));
-  app.use("/v1/owner/users", ownerAuth, ownerUserRoutes(deps));
+  // CSRF runs after auth on every owner router: it no-ops for safe methods and
+  // for bearer/unauthenticated requests, and gates cookie-session mutations.
+  const csrf = requireCsrf(deps);
+  app.use("/v1/owner/properties", ownerAuth, csrf, ownerPropertyRoutes(deps));
+  app.use("/v1/owner/submissions", ownerAuth, csrf, ownerSubmissionRoutes(deps));
+  app.use("/v1/owner/passenger-cards", ownerAuth, csrf, ownerPassengerCardRoutes(deps));
+  app.use("/v1/owner/users", ownerAuth, csrf, ownerUserRoutes(deps));
 
   app.use((_req, res) => {
     sendError(res, 404, "not_found");

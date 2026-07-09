@@ -5,7 +5,8 @@ import { ownerLoginRequestSchema } from "@gr/shared";
 import type { AppDeps } from "../deps.js";
 import { sendError } from "../lib/httpErrors.js";
 import { auditMetaFromRequest } from "../lib/requestMeta.js";
-import { requireOwnerAuth, signOwnerToken } from "../middleware/auth.js";
+import { getCookie, requireOwnerAuth, signOwnerToken } from "../middleware/auth.js";
+import { requireCsrf, csrfTokenForSession } from "../middleware/csrf.js";
 import { loginRateLimit } from "../middleware/rateLimit.js";
 
 /** Parses "4h" / "30m" / "1d" / "90s" — the small set of formats this config value uses. */
@@ -93,13 +94,16 @@ export function ownerAuthRoutes(deps: AppDeps): Router {
       res.setHeader("cache-control", "no-store");
       res.json({
         user: { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId },
+        // Bound to this session; the SPA holds it in memory and echoes it as
+        // X-CSRF-Token on mutations. Never stored in localStorage.
+        csrfToken: csrfTokenForSession(deps, token),
       });
     } catch (error) {
       next(error);
     }
   });
 
-  router.post("/logout", (_req, res) => {
+  router.post("/logout", requireCsrf(deps), (_req, res) => {
     res.clearCookie(deps.config.ownerAuthCookieName, {
       path: "/",
       sameSite: "strict",
@@ -111,12 +115,16 @@ export function ownerAuthRoutes(deps: AppDeps): Router {
 
   router.get("/me", requireOwnerAuth(deps), (req, res) => {
     const auth = req.auth!;
+    // Re-issue the session-bound CSRF token so a page reload can recover it
+    // (cookie sessions only; bearer clients are not cookie-CSRF-exploitable).
+    const sessionToken = getCookie(req, deps.config.ownerAuthCookieName);
     res.setHeader("cache-control", "no-store");
     res.json({
       id: auth.userId,
       email: auth.email,
       role: auth.role,
       tenantId: auth.tenantId,
+      csrfToken: sessionToken ? csrfTokenForSession(deps, sessionToken) : null,
     });
   });
 

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { Navigate } from "react-router-dom";
-import { apiGet, apiAction } from "../api/client.js";
+import { apiGet, apiAction, setCsrfToken } from "../api/client.js";
 
 type OwnerUser = {
   id: string;
@@ -17,11 +17,13 @@ type OwnerUser = {
   tenantId: string;
 };
 
+type MeResponse = OwnerUser & { csrfToken: string | null };
+
 type OwnerAuthState = {
   user: OwnerUser | null;
   /** Undefined until the initial session check (GET /me) resolves. */
   ready: boolean;
-  login: (user: OwnerUser) => void;
+  login: (user: OwnerUser, csrfToken: string) => void;
   logout: () => void;
 };
 
@@ -32,18 +34,26 @@ export function OwnerAuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    apiGet<OwnerUser>("/v1/owner/auth/me")
-      .then(setUser)
-      .catch(() => setUser(null))
+    apiGet<MeResponse>("/v1/owner/auth/me")
+      .then(({ csrfToken, ...nextUser }) => {
+        setCsrfToken(csrfToken);
+        setUser(nextUser);
+      })
+      .catch(() => {
+        setCsrfToken(null);
+        setUser(null);
+      })
       .finally(() => setReady(true));
   }, []);
 
-  const login = useCallback((nextUser: OwnerUser) => {
+  const login = useCallback((nextUser: OwnerUser, csrfToken: string) => {
+    setCsrfToken(csrfToken);
     setUser(nextUser);
   }, []);
 
   const logout = useCallback(() => {
     apiAction("/v1/owner/auth/logout").catch(() => undefined);
+    setCsrfToken(null);
     setUser(null);
   }, []);
 

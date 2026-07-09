@@ -9,6 +9,18 @@ export class ApiError extends Error {
   }
 }
 
+// CSRF token bound to the owner session. Held in memory ONLY (never localStorage):
+// issued by login / GET /me and echoed as X-CSRF-Token on every owner mutation.
+let csrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null): void {
+  csrfToken = token;
+}
+
+function withCsrf(headers: Record<string, string> = {}): Record<string, string> {
+  return csrfToken ? { ...headers, "x-csrf-token": csrfToken } : headers;
+}
+
 async function parseError(response: Response): Promise<never> {
   let code = "request_failed";
   try {
@@ -30,7 +42,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
     credentials: "include",
-    headers: { "content-type": "application/json" },
+    headers: withCsrf({ "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!response.ok) await parseError(response);
@@ -41,7 +53,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "PATCH",
     credentials: "include",
-    headers: { "content-type": "application/json" },
+    headers: withCsrf({ "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!response.ok) await parseError(response);
@@ -52,6 +64,7 @@ export async function apiAction(path: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
     credentials: "include",
+    headers: withCsrf(),
   });
   if (!response.ok) await parseError(response);
 }

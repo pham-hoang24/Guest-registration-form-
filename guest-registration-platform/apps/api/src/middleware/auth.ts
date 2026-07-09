@@ -41,7 +41,7 @@ export function signOwnerToken(deps: AppDeps, user: OwnerTokenClaims): string {
 // Cookie / bearer token extraction
 // ---------------------------------------------------------------------------
 
-function getCookie(req: Request, name: string): string | undefined {
+export function getCookie(req: Request, name: string): string | undefined {
   const header = req.headers.cookie;
   if (!header) return undefined;
   for (const part of header.split(";")) {
