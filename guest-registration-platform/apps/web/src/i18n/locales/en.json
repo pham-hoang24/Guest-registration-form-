@@ -20,7 +20,7 @@
     "lastName": "Last name",
     "dateOfBirth": "Date of birth",
     "identityHint": "Provide a date of birth, or a Finnish personal identity code below — not both.",
-    "citizenship": "Citizenship / nationality",
+    "citizenship": "Nationality",
     "countryOfEntry": "Country you arrived from when entering Finland",
     "countrySelect": "Select a country…",
     "address": "Home address",

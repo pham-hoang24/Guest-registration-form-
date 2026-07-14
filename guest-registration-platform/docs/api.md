@@ -78,8 +78,8 @@ token/URL/hash. 400 `validation_failed` · 403 `forbidden` · 404 `not_found` ·
 — metadata only, no guest names/contacts. 404 `not_found` for foreign property.
 
 ### GET /v1/owner/submissions/:submissionId
-200: full submission detail incl. guests (names, DOB, nationality, documentType —
-**never** document numbers) and `pdfAvailable`. Writes `OWNER_VIEWED_SUBMISSION` audit.
+200: full submission detail incl. guests (names, DOB, nationality stored as `citizenship` —
+**never** document numbers) and per-card PDF availability. Writes `OWNER_VIEWED_SUBMISSION` audit.
 
 ### GET /v1/owner/submissions/:submissionId/pdf
 Roles: OWNER, MANAGER (VIEWER → 403 `forbidden`).

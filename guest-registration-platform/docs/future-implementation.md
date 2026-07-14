@@ -25,7 +25,7 @@
  ├───────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
  │ Backend validation                                    │ ✅ Done (gap: schemas not .strict())                           │
  ├───────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
- │ PDF generation + requirement_version                  │ ✅ Done (gap: placeholder legal version; non-Latin-1 → ?)      │
+ │ PDF generation + requirement_version                  │ ✅ Done — official TEM AcroForm template fill; legal review pending │
  ├───────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
  │ Encrypted PDF storage (AES-256-GCM, AAD, key version) │ ✅ Done — packages/crypto/src/envelope.ts, EncryptedPdf model  │
  ├───────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
@@ -41,7 +41,7 @@
  ├───────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
  │ Seed owner/property/token                             │ ✅ Done — packages/db/src/seed.ts                              │
  ├───────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
- │ QR code                                               │ ❌ Not built (P1)                                              │
+ │ QR code                                               │ ✅ Done — RegistrationLinkDialog + active-registration-link API  │
  ├───────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
  │ Dockerfiles / deploy for monorepo apps                │ ❌ Missing (compose has Postgres only)                         │
  └───────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────┘
@@ -639,14 +639,15 @@ Implement before adding more product features:
 
 
 
- Tier 3 — MVP polish (P1 items from the feature plan)
+ Tier 3 — MVP polish (P1 items from the feature plan) — **DONE**
 
- 8. QR code generation — owner UI: render a QR for each property's registration link (client-side qrcode lib on OwnerPropertiesPage.tsx, PNG download). Note: raw tokens
- are only shown at seed/link-creation time, so QR must be generated where the raw link is available (link creation response), not from the stored hash.
- 9. Unicode font in PDFs — embed a font via @pdf-lib/fontkit in packages/pdf/src/registrationPdf.ts so Finnish/Swedish/other names don't degrade to ? (the legacy
- backend/src/pdf/templates/default/v1.ts already does this — reuse its approach).
- 10. Country-of-residence field — the MVP field list includes it; the current form has only free-text address. Add countryOfResidence (ISO alpha-2) to guestSchema, the
- Prisma Guest model, the form, and the PDF.
+ 8. ✅ QR code generation — `RegistrationLinkDialog.tsx` on `OwnerPropertiesPage.tsx`; client-side
+    `qrcode` lib; PNG download; raw URL shown once from `POST .../active-registration-link`.
+ 9. ✅ Official TEM PDF — `generatePassengerCardPdf` fills AcroForm template at
+    `packages/pdf/templates/passenger-card.pdf` (reference only; legal review pending).
+    DejaVu via `updateFieldAppearances` for Unicode names.
+ 10. ✅ Nationality — field 4 displayed as Nationality in UI/PDF; stored internally as `citizenship`.
+     **Skipped:** `countryOfResidence` (data minimization; not collected).
 
  Tier 4 — Track, don't build yet
 
@@ -695,15 +696,21 @@ This sprint only covers Tier 1 hardening.
 
 ### Excluded
 
-* QR code generation
 * Dockerfiles
 * JWKS/RS256 auth
 * httpOnly cookie migration
-* Unicode PDF font
 * country-of-residence field
 * Azure deployment
 * Key rotation
 * Dashboard polish
+
+### Implemented (Tier 3)
+
+* QR code generation — `POST /v1/owner/properties/:propertyId/active-registration-link` +
+  `RegistrationLinkDialog.tsx` (client-side QR, copy URL, PNG download)
+* Official TEM PDF — `generatePassengerCardPdf` fills `packages/pdf/templates/passenger-card.pdf`
+* Unicode PDF font — DejaVu via `updateFieldAppearances`
+* Nationality label — UI/PDF say Nationality; stored as `citizenship`
 
 ---
 
@@ -1319,7 +1326,9 @@ must not share a commit with new features (if login/session breaks, isolate the 
 - **Tests:** each owner mutation rejects a missing/invalid CSRF token with 403; a valid token succeeds;
   existing owner-UI flows keep working.
 
-## Tier 3D — Active registration link lifecycle + QR
+## Tier 3D — Active registration link lifecycle + QR — **IMPLEMENTED**
+
+See `apps/api/src/routes/ownerProperties.ts` and `apps/web/src/owner/RegistrationLinkDialog.tsx`.
 
 **Endpoint** `POST /v1/owner/properties/:propertyId/active-registration-link` in
 `apps/api/src/routes/ownerProperties.ts` (router/`AppDeps` pattern, `ownerProperties.ts:5`):
@@ -1377,23 +1386,10 @@ token/url/hash; old active→REVOKED, empty→EXPIRED, submitted→CLOSED; new l
 **partial unique index blocks a second ACTIVE → 409 with no URL and no audit row**; rate limit
 5/property/hour; public usability for ACTIVE+future+OPEN vs past-expiry/REVOKED/EXPIRED/CLOSED.
 
-## Tier 3E — Draft template PDF filling + docs/config hardening
+## Tier 3E — Official TEM PDF template filling + docs/config hardening — **IMPLEMENTED**
 
-Currently `packages/pdf/src/registrationPdf.ts` draws a custom layout via `drawField`. This slice
-fills a **draft template** for the active `FormRequirementVersion`:
-- **Do not ship the official TEM PDF asset in production until licensing / right-to-use is confirmed
-  (Tier 4).** Tier 3 uses a **draft internal template based on the reviewed field mapping**; if a TEM
-  PDF is committed for reference, docs must mark it **draft / reference only, not legally approved**.
-- Load the template; fill AcroForm fields if present, else overlay text at coordinates. Keep the
-  embedded DejaVu font, place the signature image, flatten, then encrypt final bytes (invariants 1-3:
-  plaintext PDF only in memory, fresh DEK per doc, AAD binds context).
-- **One PDF per adult PassengerCard**; spouse/children ride on the holder's card (surname / given
-  names / PIC-or-DOB only).
-- Field mapping lives in the config: surname, given names, PIC-or-DOB, nationality (full name),
-  address, passport/ID no. (blank when N/A), spouse/minor rows, arrival, departure, country-of-entry
-  (full name, blank when resident), purpose, signature, provider name/ID/address. **Never render**
-  email, phone, countryOfResidence, documentType, internal not-applicable reasons, or token/audit data.
-- Thread fields through the worker mapper (`apps/worker/src/generatePdfForPassengerCard.ts`).
+See `packages/pdf/src/passengerCardPdf.ts` and `docs/pdf-generation.md`. The legacy
+`registrationPdf.ts` draft renderer remains for unit tests only.
 
 **Config/secret hardening:** `PUBLIC_APP_URL` must parse via `new URL()`; production rejects non-HTTPS,
 `localhost`/`127.0.0.1`/private hosts, weak `JWT_SECRET` / `FINGERPRINT_PEPPER`, missing Redis when

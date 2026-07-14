@@ -33,6 +33,7 @@ services:
       retries: 10
 
   api:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -71,6 +72,7 @@ services:
       retries: 10
 
   worker:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
@@ -96,6 +98,7 @@ services:
       sh -c "while true; do pnpm --filter @gr/worker exec tsx src/runRetention.ts; sleep $$((RETENTION_INTERVAL_HOURS * 3600)); done"
 
   web:
+    profiles: ["full"]
     build:
       context: .
       dockerfile: apps/web/Dockerfile

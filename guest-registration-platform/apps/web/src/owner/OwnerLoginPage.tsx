@@ -22,7 +22,26 @@ export default function OwnerLoginPage() {
       }>("/v1/owner/auth/login", { email, password });
       login(result.user, result.csrfToken);
       navigate("/owner/properties");
-    } catch {
+    } catch (error) {
+      // #region agent log
+      fetch("http://127.0.0.1:7593/ingest/0b44e68a-d6ba-48b1-8f82-e6525231d7b1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd0723" },
+        body: JSON.stringify({
+          sessionId: "fd0723",
+          location: "OwnerLoginPage.tsx:onSubmit",
+          message: "login catch",
+          data: {
+            hypothesisId: "A,B,D,E",
+            runId: "post-fix",
+            errorName: error instanceof Error ? error.name : "unknown",
+            errorMessage: error instanceof Error ? error.message : String(error),
+            isApiError: error instanceof Error && error.name === "ApiError",
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setError("Invalid email or password.");
     } finally {
       setBusy(false);

@@ -1,3 +1,4 @@
+import { NORDIC_CITIZENSHIPS } from "@gr/shared";
 import type { RegistrationCardPdfInput, RegistrationPdfPerson } from "./registrationPdf.js";
 
 /**
@@ -129,4 +130,38 @@ export function mapCardToTemFields(input: RegistrationCardPdfInput): TemCardFiel
   ];
 
   return { holder, family, countryOfEntry, stay, provider };
+}
+
+const NORDIC = new Set<string>(NORDIC_CITIZENSHIPS);
+
+function isNordicCitizenship(citizenship: string | null | undefined): boolean {
+  return Boolean(citizenship && NORDIC.has(citizenship.toUpperCase()));
+}
+
+/**
+ * Fail closed before rendering: field 6 and field 12 must only be blank when
+ * residency / Nordic rules allow it. Throws so the worker marks the card FAILED
+ * instead of shipping an incomplete legal document.
+ */
+export function assertMinimizationInvariants(
+  input: RegistrationCardPdfInput,
+  fields: TemCardFields,
+): void {
+  const documentNumber = fields.holder.find((f) => f.key === "documentNumber")!.value;
+  const documentNumberOk =
+    documentNumber !== "" ||
+    input.cardHolder.isResidentInFinland === true ||
+    isNordicCitizenship(input.cardHolder.citizenship);
+
+  if (!documentNumberOk) {
+    throw new Error(
+      "Field 6 (passport/ID no.) is blank but holder is neither resident in Finland nor a Nordic citizen",
+    );
+  }
+
+  const entryOk =
+    fields.countryOfEntry.value !== "" || input.cardHolder.isResidentInFinland === true;
+  if (!entryOk) {
+    throw new Error("Field 12 (country of entry) is blank but holder is not resident in Finland");
+  }
 }

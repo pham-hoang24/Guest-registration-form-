@@ -103,7 +103,7 @@ export default function SubmissionDetailPage() {
                     </p>
                     <p className="text-slate-500">
                       {guest.dateOfBirth ? `Born ${guest.dateOfBirth}` : "Identified by personal identity code"}
-                      {guest.citizenship ? ` · ${guest.citizenship}` : ""}
+                      {guest.citizenship ? ` · Nationality ${guest.citizenship}` : ""}
                     </p>
                   </li>
                 ))}

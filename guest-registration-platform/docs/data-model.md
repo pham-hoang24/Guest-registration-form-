@@ -27,8 +27,8 @@ Source of truth: `packages/db/prisma/schema.prisma`. All IDs are UUIDs.
 - **Guest** — one person on a card. The card holder carries full detail; spouse/minor children
   are reduced rows. `documentNumberEncrypted` and `finnishPersonalIdentityCodeEncrypted` are
   envelope-encrypted JSON blobs (never plaintext); `dateOfBirth` is null on the PIC path.
-  `citizenship` (field 4, nationality) is always required for card holders — a Finnish
-  personal identity code does not encode it. `isResidentInFinland` is an explicit required
+  `citizenship` (field 4; displayed as **Nationality** in UI/PDF; full country name on the
+  card) is always required for card holders — a Finnish personal identity code does not encode it. `isResidentInFinland` is an explicit required
   choice for every adult. `documentNumberNotApplicableReason` ∈ RESIDENT_IN_FINLAND |
   NORDIC_CITIZEN — exempt ONLY for residents or Nordic citizens; holding a Finnish personal
   identity code does NOT exempt the document number (field 6).

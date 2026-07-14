@@ -39,7 +39,9 @@ export default function SignatureField({
     };
     resize();
 
-    const pad = new SignaturePad(canvas, { backgroundColor: "rgba(255,255,255,1)" });
+    // Transparent backing so the exported PNG contains only strokes — the visible
+    // white background comes from the canvas CSS class, not the PNG pixels.
+    const pad = new SignaturePad(canvas);
     padRef.current = pad;
     pad.addEventListener("endStroke", () =>
       onChangeRef.current(pad.isEmpty() ? "" : pad.toDataURL("image/png")),

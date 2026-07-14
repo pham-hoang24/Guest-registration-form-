@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { LocalKmsProvider, encryptString } from "@gr/crypto";
+import { LocalKmsProvider, encryptString, decryptPdf } from "@gr/crypto";
 import { PrismaClient, createRegistrationLinkWithStay } from "@gr/db";
 import { LocalStorageProvider } from "@gr/storage";
 import { generatePdfForPassengerCard } from "../src/generatePdfForPassengerCard.js";
@@ -156,7 +156,7 @@ async function seed() {
       propertyId: property.id,
       cardNumber: 2,
       cardType: "ADDITIONAL_ADULT_INDIVIDUAL",
-      countryOfEntryNotApplicableReason: "NORDIC_CITIZEN",
+      countryOfEntryToFinland: "DK",
       submissionFingerprint: `fp2-${randomUUID()}`,
       requirementVersion: "FI-ACCOMMODATION-2026-01",
       guests: {
@@ -235,6 +235,28 @@ describe("generatePdfForPassengerCard", () => {
     expect(aad1.passengerCardId).toBe(card1);
     expect(aad1.guestSubmissionId).toBe(stay.id);
     expect(aad1.schemaVersion).toBe("encrypted-passenger-card-pdf-v1");
+
+    // Decrypted PDF is a filled official template (valid PDF, single page).
+    const plaintext = await decryptPdf({
+      ciphertext: storedBlob,
+      encryptedDekBase64: pdf1!.encryptedDekBase64,
+      ivBase64: pdf1!.ivBase64,
+      authTagBase64: pdf1!.authTagBase64,
+      aadJson: pdf1!.aadJson,
+      kekKeyId: pdf1!.kekKeyId,
+      kms,
+      expectedContext: {
+        tenantId: tenant.id,
+        propertyId: property.id,
+        guestSubmissionId: stay.id,
+        passengerCardId: card1,
+        requirementVersion: "FI-ACCOMMODATION-2026-01",
+        schemaVersion: "encrypted-passenger-card-pdf-v1",
+      },
+    });
+    expect(plaintext.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    // Filled template is substantially larger than the empty AcroForm asset (~35 KB).
+    expect(plaintext.length).toBeGreaterThan(50_000);
 
     // Card + job status transitions.
     const c1 = await db.passengerCard.findUnique({ where: { id: card1 } });

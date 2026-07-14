@@ -1,4 +1,5 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? "" : "http://localhost:3000");
 
 export class ApiError extends Error {
   constructor(
@@ -42,12 +43,61 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const url = `${API_BASE_URL}${path}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: withCsrf({ "content-type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    // #region agent log
+    fetch("http://127.0.0.1:7593/ingest/0b44e68a-d6ba-48b1-8f82-e6525231d7b1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd0723" },
+      body: JSON.stringify({
+        sessionId: "fd0723",
+        location: "client.ts:apiPost",
+        message: "fetch failed",
+        data: {
+          hypothesisId: "A",
+          runId: "post-fix",
+          path,
+          apiBaseUrl: API_BASE_URL,
+          pageOrigin: typeof window !== "undefined" ? window.location.origin : null,
+          errorName: error instanceof Error ? error.name : "unknown",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    throw error;
+  }
+  // #region agent log
+  fetch("http://127.0.0.1:7593/ingest/0b44e68a-d6ba-48b1-8f82-e6525231d7b1", {
     method: "POST",
-    credentials: "include",
-    headers: withCsrf({ "content-type": "application/json" }),
-    body: JSON.stringify(body),
-  });
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd0723" },
+    body: JSON.stringify({
+      sessionId: "fd0723",
+      location: "client.ts:apiPost",
+      message: "fetch response",
+      data: {
+        hypothesisId: "A,B,C",
+        runId: "post-fix",
+        path,
+        apiBaseUrl: API_BASE_URL,
+        pageOrigin: typeof window !== "undefined" ? window.location.origin : null,
+        status: response.status,
+        ok: response.ok,
+        corsOrigin: response.headers.get("access-control-allow-origin"),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   if (!response.ok) await parseError(response);
   return response.json() as Promise<T>;
 }

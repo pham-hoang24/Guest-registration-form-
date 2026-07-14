@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import { LINK_TTL_HOURS, type LinkTtlHours } from "@gr/shared";
-import { apiGet, apiPost } from "../api/client.js";
+import { ApiError, apiGet, apiPost } from "../api/client.js";
 
 type Submission = {
   id: string;
@@ -85,7 +85,25 @@ export default function RegistrationLinkDialog({
         { arrivalDate, departureDate, maxPassengerCards, linkTtlHours },
       );
       setResult(created);
-    } catch {
+    } catch (error) {
+      // #region agent log
+      fetch("http://127.0.0.1:7593/ingest/0b44e68a-d6ba-48b1-8f82-e6525231d7b1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd0723" },
+        body: JSON.stringify({
+          sessionId: "fd0723",
+          location: "RegistrationLinkDialog.tsx:onSubmit",
+          message: "link create catch",
+          data: {
+            hypothesisId: "F",
+            runId: "post-fix-link",
+            status: error instanceof ApiError ? error.status : null,
+            code: error instanceof ApiError ? error.code : error instanceof Error ? error.message : String(error),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setError("Could not create the link. Check the dates and try again.");
     } finally {
       setBusy(false);

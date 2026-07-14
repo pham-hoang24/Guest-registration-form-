@@ -22,11 +22,15 @@ cp .env.example .env
 # set LOCAL_KMS_MASTER_KEY_BASE64 in .env:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
-docker compose up -d      # PostgreSQL 16 on localhost:5433 (+ test database)
+docker compose up -d      # PostgreSQL + Redis only (host port 5433)
 pnpm db:migrate           # prisma migrate dev
 pnpm db:seed              # prints owner/viewer logins + registration URL
 pnpm dev                  # API on :3000, web on :5173
 ```
+
+> **Do not run the full Docker stack (`docker compose --profile full up -d`) at the
+> same time as `pnpm dev`** — both bind port 3000. The default `docker compose up -d`
+> starts only Postgres and Redis; use `pnpm dev` for the API and web with live reload.
 
 ## Verify the end-to-end flow
 

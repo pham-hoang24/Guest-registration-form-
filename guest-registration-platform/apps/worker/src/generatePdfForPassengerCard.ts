@@ -1,5 +1,5 @@
 import { decryptString, encryptPdf } from "@gr/crypto";
-import { generateRegistrationPdf, type RegistrationPdfPerson } from "@gr/pdf";
+import { generatePassengerCardPdf, type RegistrationPdfPerson } from "@gr/pdf";
 import { encryptedPdfBlobPath } from "@gr/storage";
 import { writeAudit } from "@gr/db";
 import type { WorkerDeps } from "./deps.js";
@@ -129,7 +129,7 @@ export async function generatePdfForPassengerCard(
         }),
     );
 
-    const pdfBytes = await generateRegistrationPdf({
+    const pdfBytes = await generatePassengerCardPdf({
       guestSubmissionId: submission.id,
       passengerCardId: card.id,
       cardNumber: card.cardNumber,

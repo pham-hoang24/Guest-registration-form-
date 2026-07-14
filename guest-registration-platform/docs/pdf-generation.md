@@ -2,41 +2,58 @@
 
 How a signed passenger card becomes an encrypted PDF, and the rules the layout must obey.
 
-## Status: DRAFT template, legal review pending
+## Status: reference template, legal review pending
 
-Tier 3 renders a **draft** passenger card that follows the TEM passenger-card field model. The
-active form requirement version (`packages/shared/src/form-requirements/temPassengerCard.v1.ts`,
-`FI-TEM-PASSENGER-CARD-2026-DRAFT-V1`) ships with `reviewStatus: LEGAL_REVIEW_PENDING`. This is a
-**placeholder pending human legal sign-off** (CLAUDE.md invariant 10) — nothing here asserts the
-form is official, authority-ready, or legally compliant.
+The worker fills the official TEM AcroForm template (`packages/pdf/templates/passenger-card.pdf`,
+copied from `Matkustajailmoitusmalli.pdf`) as a **reference asset only — draft / not legally
+approved** until Tier 4 licensing and legal sign-off (CLAUDE.md invariant 10). Nothing here asserts
+the form is authority-ready or legally compliant.
 
-- The rendered PDF carries a visible `DRAFT — generated from a configured template; legal review
-  pending.` banner.
-- The **official TEM PDF asset is not shipped**. If a real TEM PDF is ever committed for reference,
-  it must be marked *draft / reference only, not legally approved* (Tier 4 confirms licensing /
-  right-to-use).
-- Production **fails closed**: `configFromEnv` refuses to start when the active requirement version
-  is not `LEGAL_APPROVED`, unless `REQUIRE_LEGAL_APPROVED_REQUIREMENTS=false` is set deliberately.
-  The flag defaults to `true` in production.
+The active form requirement version (`packages/shared/src/form-requirements/temPassengerCard.v1.ts`,
+`FI-TEM-PASSENGER-CARD-2026-DRAFT-V1`) ships with `reviewStatus: LEGAL_REVIEW_PENDING`.
+
+Production **fails closed**: `configFromEnv` refuses to start when the active requirement version
+is not `LEGAL_APPROVED`, unless `REQUIRE_LEGAL_APPROVED_REQUIREMENTS=false` is set deliberately.
+The flag defaults to `true` in production.
+
+The legacy draft renderer (`packages/pdf/src/registrationPdf.ts`) remains for unit tests only; the
+worker uses `generatePassengerCardPdf` (`packages/pdf/src/passengerCardPdf.ts`).
 
 ## Pipeline
 
 1. Worker `generatePdfForPassengerCard` (`apps/worker/src/generatePdfForPassengerCard.ts`) loads one
    `PassengerCard`, its guests, and its signature; decrypts the signature (and any document number)
    in memory only.
-2. It projects the card to a data object and calls `generateRegistrationPdf`
-   (`packages/pdf/src/registrationPdf.ts`).
+2. It projects the card to a data object and calls `generatePassengerCardPdf`
+   (`packages/pdf/src/passengerCardPdf.ts`).
 3. `mapCardToTemFields` (`packages/pdf/src/temFieldMap.ts`) turns that object into numbered TEM
    fields. This is a **pure, unit-tested projection** — the blank/full-name rules are testable
-   independently of pdf-lib layout (`packages/pdf/tests/temFieldMap.test.ts`).
-4. The layer renders text + signature image with the bundled DejaVu font (Vietnamese + Nordic
-   glyphs survive; no `?` substitution), producing PDF bytes **in memory**.
+   independently of AcroForm filling (`packages/pdf/tests/temFieldMap.test.ts`).
+4. The generator loads the bundled template, fills AcroForm fields via `pdf-lib`, runs
+   `assertMinimizationInvariants` (fail closed), updates field appearances with the bundled DejaVu
+   Sans font, trims and overlays the transparent signature PNG within a verified safe zone,
+   flattens the form, and produces PDF bytes **in memory**.
 5. Those bytes are AES-256-GCM encrypted with a fresh DEK, the DEK is wrapped by `KmsProvider`, and
    only ciphertext + wrapped DEK reach storage/DB (invariants 1–3). The AAD binds
    `{tenantId, propertyId, submissionId, requirementVersion}` plus the passenger-card id.
 
 Invariant 1 is regression-tested: the stored blob must **not** begin with `%PDF-`
 (`apps/worker/tests/generatePdfForPassengerCard.test.ts`).
+
+## AcroForm field map
+
+| Template field | TEM field | Source |
+|---|---|---|
+| `Text1`–`Text6` | 1–6 | Card holder surname, given names, PIC/DOB, nationality, address, passport/ID |
+| `A1.i`, `A2.i`, `A3.i` | 7–9 | Accompanying person *i* surname, given names, PIC/DOB |
+| `Text7`, `Text8` | 10–11 | Arrival, departure |
+| `Text8b` | 12 | Country of entry (blank when resident in Finland) |
+| `Check Box1`–`4` | 13 | Purpose: Leisure / Business / Meeting / Other |
+| *(overlay)* | 16 | Signature PNG (transparent, trimmed, centered in safe zone) |
+| `Check Box5` | — | **Never ticked** — sits beside the marketing-prohibition notice on the template, not a consent field |
+| `Text9`–`Text11` | 17–19 | Provider name, business ID, visiting address |
+
+Template field names are verified by `packages/pdf/tests/passengerCardTemplate.test.ts`.
 
 ## One PDF per adult card
 
@@ -49,18 +66,18 @@ field 7. The card holder is the only person carrying the full detail set.
 `mapCardToTemFields` projects only these fields:
 
 - **Holder (1–6):** surname, given names, PIC-or-DOB, nationality (**full country name**, not the
-  ISO code), address, passport/ID number.
+  ISO code; stored internally as `citizenship`), address, passport/ID number.
 - **Family riders (7+):** surname, given names, PIC-or-DOB only.
 - **Entry & stay (12–15):** country of entry (**full name**), arrival, departure, purpose.
-- **Signature (16):** the decoded PNG image + signed-at timestamp.
+- **Signature (16):** the decoded PNG image (overlaid; no AcroForm field).
 - **Provider (17–19):** name, business id, address (**full country name**).
 
 Conditional blanks (present but empty — the box stays on the card):
 
-- **Field 6 (passport / ID no.)** is blank ONLY when the holder is resident in Finland or a
-  Nordic citizen (TEM footnote 1). Holding a Finnish personal identity code does **not** blank
-  it — a non-resident, non-Nordic holder must supply a document number even with a PIC.
-- **Field 12 (country of entry)** is blank when the holder is resident in Finland
+- **Field 6 (passport / ID no.)** is blank ONLY when the holder is **resident in Finland** or a
+  **Nordic citizen** (TEM footnote 1). Nationality alone does not blank field 6 — a non-resident,
+  non-Nordic holder with Afghan (or any non-Nordic) nationality must still have a document number.
+- **Field 12 (country of entry)** is blank when the holder is **resident in Finland**
   (`isResidentInFinland === true` or reason `RESIDENT_IN_FINLAND`). Nordic citizenship does **not**
   blank it — only residency does.
 - **Departure** is always required and always rendered (no "unknown departure" state).
@@ -69,6 +86,31 @@ Conditional blanks (present but empty — the box stays on the card):
 not-applicable reason codes, and any token/audit data. These are excluded *by construction* — the
 `RegistrationCardPdfInput` type does not carry them — and a test asserts none appear in the
 serialized field output.
+
+## Signature overlay
+
+- Guest signatures are captured with a **transparent** PNG backing (`SignatureField.tsx`); only
+  strokes are opaque.
+- Before embedding, `trimTransparentPadding` (`packages/pdf/src/signatureImage.ts`) crops
+  transparent margins.
+- The image is scaled to at most 85% of the safe-zone width and 65% of its height, centered
+  vertically within `SIGNATURE_SAFE_ZONE` (`x: 60, y: 160, width: 240, height: 36`), verified
+  against the template via `pdftotext -bbox`. The zone sits between the provider-section header
+  (~y 157.5) and the signature-label line (~y 198.7) and must not overlap the marketing-prohibition
+  notice or provider fields.
+
+## Render validation
+
+Before any field is written, `assertMinimizationInvariants` throws if field 6 or field 12 would be
+blank for a holder who is not allowed to omit them. The worker marks the card `FAILED` and writes
+`PDF_GENERATION_FAILED` — fail closed rather than ship a non-conforming document (CLAUDE.md
+invariant 10).
+
+Automated tests (`packages/pdf/tests/passengerCardPdf.test.ts`) enforce:
+
+- `Check Box5` is never ticked; only one purpose checkbox (1–4) is checked.
+- Signature placement stays inside `SIGNATURE_SAFE_ZONE`.
+- Non-resident, non-Nordic holders cannot render with blank field 6 or field 12.
 
 ## Product rules (not legal claims)
 

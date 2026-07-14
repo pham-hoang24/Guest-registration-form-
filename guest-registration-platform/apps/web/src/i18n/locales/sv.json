@@ -20,7 +20,7 @@
     "lastName": "Efternamn",
     "dateOfBirth": "Födelsedatum",
     "identityHint": "Ange födelsedatum eller ett finskt personnummer nedan — inte båda.",
-    "citizenship": "Medborgarskap / nationalitet",
+    "citizenship": "Nationalitet",
     "countryOfEntry": "Land du anlände från vid inresa till Finland",
     "countrySelect": "Välj ett land…",
     "address": "Hemadress",
