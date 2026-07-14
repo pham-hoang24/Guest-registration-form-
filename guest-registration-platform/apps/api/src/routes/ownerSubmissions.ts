@@ -82,7 +82,8 @@ export function ownerSubmissionRoutes(deps: AppDeps): Router {
         status: submission.status,
         property: submission.property,
         arrivalDate: submission.arrivalDate.toISOString().slice(0, 10),
-        // Departure is nullable when the guest didn't know it at submission time.
+        // Departure is always supplied (owner sets it on link creation; guest
+        // confirms it at submission); kept nullable only for pre-Tier-3E rows.
         departureDate: submission.departureDate?.toISOString().slice(0, 10) ?? null,
         departureDateKnown: submission.departureDateKnown,
         purposeOfStay: submission.purposeOfStay,

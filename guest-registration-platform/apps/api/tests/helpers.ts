@@ -169,7 +169,6 @@ const VALID_PNG = Buffer.from(
 export type MultipartSubmissionOptions = {
   arrivalDate?: string;
   departureDate?: string;
-  departureDateKnown?: boolean;
   purposeOfStay?: string;
   /** Extra or missing signature fields for negative testing. */
   signatureFields?: Record<string, Buffer>;
@@ -188,14 +187,13 @@ export type MultipartSubmissionOptions = {
 export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) {
   const {
     arrivalDate = "2026-07-20",
-    departureDateKnown = true,
     purposeOfStay = "Leisure",
     additionalAdultCount = 0,
     primaryOverrides = {},
     additionalAdultOverrides = {},
   } = opts;
-  // Distinguish "not passed" (default date) from an explicit `undefined` (omit it),
-  // so callers can build a departureDateKnown:true payload with no date.
+  // Distinguish "not passed" (default date) from an explicit `undefined` (omit
+  // the key entirely), so callers can build a payload missing departureDate.
   const departureDate = "departureDate" in opts ? opts.departureDate : "2026-07-23";
 
   const people: object[] = [
@@ -230,8 +228,7 @@ export function buildMultipartSubmission(opts: MultipartSubmissionOptions = {}) 
 
   const payload = JSON.stringify({
     arrivalDate,
-    ...(departureDateKnown && departureDate ? { departureDate } : {}),
-    departureDateKnown,
+    departureDate,
     purposeOfStay,
     privacyAccepted: true,
     accuracyConfirmed: true,

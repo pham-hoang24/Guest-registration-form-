@@ -48,8 +48,7 @@ function birthDateOf(p: PersonForm): string | null {
 export const registrationFormSchema = z
   .object({
     arrivalDate: iso,
-    departureDate: z.string().optional(),
-    departureDateKnown: z.boolean(),
+    departureDate: iso,
     purposeOfStay: z.enum(PURPOSES_OF_STAY),
     privacyAccepted: z.literal(true, {
       errorMap: () => ({ message: "Privacy notice must be accepted" }),
@@ -60,10 +59,7 @@ export const registrationFormSchema = z
     people: z.array(personFormSchema).min(1).max(21),
   })
   .superRefine((data, ctx) => {
-    if (data.departureDateKnown && !data.departureDate) {
-      ctx.addIssue({ code: "custom", message: "Required when known", path: ["departureDate"] });
-    }
-    if (data.departureDate && data.departureDate < data.arrivalDate) {
+    if (data.departureDate < data.arrivalDate) {
       ctx.addIssue({ code: "custom", message: "Cannot be before arrival", path: ["departureDate"] });
     }
 
@@ -98,18 +94,22 @@ export const registrationFormSchema = z
         if (p.countryOfEntryToFinland && !isKnownCountryCode(p.countryOfEntryToFinland)) {
           ctx.addIssue({ code: "custom", message: "Unknown country", path: ["people", i, "countryOfEntryToFinland"] });
         }
-        // Citizenship required only when identified by DOB (no PIC).
-        if (!hasPic && !p.citizenship) {
+        // Residency is an explicit required choice; it drives the rules below.
+        if (p.isResidentInFinland === undefined) {
+          ctx.addIssue({ code: "custom", message: "Please choose", path: ["people", i, "isResidentInFinland"] });
+        }
+        // Nationality (field 4) is always required — a Finnish PIC does not encode it.
+        if (!p.citizenship) {
           ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "citizenship"] });
         }
-        // Country of entry required for anyone not resident (no Nordic exemption).
-        if (!p.isResidentInFinland && !p.countryOfEntryToFinland) {
+        // Country of entry (field 12) required for non-residents (no Nordic exemption).
+        if (p.isResidentInFinland === false && !p.countryOfEntryToFinland) {
           ctx.addIssue({ code: "custom", message: "Required", path: ["people", i, "countryOfEntryToFinland"] });
         }
-        // Document number required only for a non-resident, non-Nordic traveler without a PIC.
+        // Passport / ID number (field 6) required for a non-resident, non-Nordic traveler.
+        // Holding a Finnish PIC does NOT exempt field 6.
         if (
-          !p.isResidentInFinland &&
-          !hasPic &&
+          p.isResidentInFinland === false &&
           p.citizenship &&
           !NORDIC.has(p.citizenship.toUpperCase()) &&
           !p.documentNumber

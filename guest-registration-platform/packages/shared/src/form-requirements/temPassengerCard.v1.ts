@@ -80,16 +80,18 @@ export const TEM_2026_DRAFT_V1: FormRequirementVersion = {
     },
     citizenship: {
       requirementType: "LEGAL_INTERPRETATION_PENDING",
-      requiredWhen: "no Finnish personal identity code provided",
+      notes: "Always required (field 4); a Finnish personal identity code does not encode nationality.",
     },
     address: { requirementType: "LEGAL_INTERPRETATION_PENDING" },
-    isResidentInFinland: { requirementType: "PRODUCT_RULE" },
+    isResidentInFinland: {
+      requirementType: "PRODUCT_RULE",
+      notes: "Explicit required binary choice for every adult; drives fields 6 and 12.",
+    },
     documentNumber: {
       requirementType: "LEGAL_INTERPRETATION_PENDING",
-      requiredWhen:
-        "identified by date of birth (not a Finnish personal identity code), not a Nordic " +
-        "citizen, and not resident in Finland",
-      notApplicableReasons: ["NORDIC_CITIZEN", "RESIDENT_IN_FINLAND", "HAS_FINNISH_PIC"],
+      requiredWhen: "not resident in Finland and not a Nordic citizen",
+      notApplicableReasons: ["NORDIC_CITIZEN", "RESIDENT_IN_FINLAND"],
+      notes: "Holding a Finnish personal identity code does NOT exempt field 6 (TEM footnote 1).",
     },
     countryOfEntryToFinland: {
       requirementType: "LEGAL_INTERPRETATION_PENDING",

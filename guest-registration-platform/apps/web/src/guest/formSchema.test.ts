@@ -62,7 +62,6 @@ describe("registrationFormSchema", () => {
   const base = {
     arrivalDate: "2026-07-20",
     departureDate: "2026-07-23",
-    departureDateKnown: true,
     purposeOfStay: "Leisure" as const,
     privacyAccepted: true as const,
     accuracyConfirmed: true as const,
@@ -78,9 +77,9 @@ describe("registrationFormSchema", () => {
     expect(r.success).toBe(false);
   });
 
-  it("allows unknown departure with no date", () => {
-    const r = registrationFormSchema.safeParse({ ...base, departureDateKnown: false, departureDate: "" });
-    expect(r.success).toBe(true);
+  it("rejects a missing departure date (always required)", () => {
+    const r = registrationFormSchema.safeParse({ ...base, departureDate: "" });
+    expect(r.success).toBe(false);
   });
 
   it("requires country of entry for a non-resident non-Nordic adult", () => {
@@ -107,7 +106,23 @@ describe("registrationFormSchema", () => {
     expect(r.success).toBe(true);
   });
 
-  it("accepts a resident adult identified by a valid PIC instead of a DOB", () => {
+  it("accepts a resident adult identified by a valid PIC instead of a DOB (nationality still required)", () => {
+    const r = registrationFormSchema.safeParse({
+      ...base,
+      people: [
+        adult({
+          dateOfBirth: "",
+          finnishPersonalIdentityCode: "120490-1235",
+          citizenship: "DE",
+          countryOfEntryToFinland: "",
+          isResidentInFinland: true,
+        }),
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects a PIC-identified resident adult with no citizenship (field 4 is always required)", () => {
     const r = registrationFormSchema.safeParse({
       ...base,
       people: [
@@ -120,7 +135,31 @@ describe("registrationFormSchema", () => {
         }),
       ],
     });
-    expect(r.success).toBe(true);
+    expect(r.success).toBe(false);
+  });
+
+  it("requires an explicit residency choice for an adult", () => {
+    const r = registrationFormSchema.safeParse({
+      ...base,
+      people: [adult({ isResidentInFinland: undefined })],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("requires documentNumber for a non-resident, non-Nordic adult even with a Finnish PIC (no PIC exemption for field 6)", () => {
+    const r = registrationFormSchema.safeParse({
+      ...base,
+      people: [
+        adult({
+          dateOfBirth: "",
+          finnishPersonalIdentityCode: "120490-1235",
+          citizenship: "VN",
+          documentNumber: "",
+          isResidentInFinland: false,
+        }),
+      ],
+    });
+    expect(r.success).toBe(false);
   });
 
   it("rejects a person supplying both a DOB and a PIC", () => {

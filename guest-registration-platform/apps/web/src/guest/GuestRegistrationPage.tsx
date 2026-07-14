@@ -36,7 +36,6 @@ const emptyPerson = (guestType: PersonForm["guestType"]): PersonForm => ({
   firstName: "",
   lastName: "",
   dateOfBirth: "",
-  isResidentInFinland: false,
   address: "",
   documentNumber: "",
   citizenship: "",
@@ -56,18 +55,16 @@ export default function GuestRegistrationPage() {
     defaultValues: {
       arrivalDate: "",
       departureDate: "",
-      departureDateKnown: true,
       purposeOfStay: "Leisure",
       privacyAccepted: undefined as unknown as true,
       accuracyConfirmed: undefined as unknown as true,
       people: [emptyPerson("primary")],
     },
   });
-  const { register, handleSubmit, formState, control, watch, trigger } = form;
+  const { register, handleSubmit, formState, control, watch, trigger, setValue } = form;
   const errors = formState.errors;
   const { fields, append, remove } = useFieldArray({ control, name: "people" });
 
-  const departureDateKnown = watch("departureDateKnown");
   const people = watch("people");
 
   useEffect(() => {
@@ -85,7 +82,10 @@ export default function GuestRegistrationPage() {
   }, []);
 
   const goToReview = async () => {
-    if (await trigger()) setReviewing(true);
+    // Validate only the fields rendered on step 1. The two confirmation literals
+    // (privacyAccepted / accuracyConfirmed) render on the review step, so a
+    // whole-form trigger() here would fail on their `undefined` values silently.
+    if (await trigger(["arrivalDate", "departureDate", "people"])) setReviewing(true);
   };
 
   const onSubmit = handleSubmit(async (data) => {
@@ -105,8 +105,7 @@ export default function GuestRegistrationPage() {
     try {
       const payload = JSON.stringify({
         arrivalDate: data.arrivalDate,
-        ...(data.departureDateKnown && data.departureDate ? { departureDate: data.departureDate } : {}),
-        departureDateKnown: data.departureDateKnown,
+        departureDate: data.departureDate,
         purposeOfStay: data.purposeOfStay,
         privacyAccepted: true,
         accuracyConfirmed: true,
@@ -197,18 +196,9 @@ export default function GuestRegistrationPage() {
                   <input type="date" className={inputClass} {...register("arrivalDate")} />
                 </Field>
                 <Field label={t("field.departureDate")} error={errors.departureDate?.message}>
-                  <input
-                    type="date"
-                    className={inputClass}
-                    disabled={!departureDateKnown}
-                    {...register("departureDate")}
-                  />
+                  <input type="date" className={inputClass} {...register("departureDate")} />
                 </Field>
               </div>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" {...register("departureDateKnown")} />
-                <span>{t("field.departureKnownToggle")}</span>
-              </label>
               <Field label={t("field.purposeOfStay")} error={errors.purposeOfStay?.message}>
                 <select className={inputClass} {...register("purposeOfStay")}>
                   {PURPOSES_OF_STAY.map((p) => (
@@ -227,6 +217,10 @@ export default function GuestRegistrationPage() {
                 guestType={people?.[index]?.guestType ?? "primary"}
                 locale={currentLang}
                 t={t}
+                isResident={people?.[index]?.isResidentInFinland}
+                onResidentChange={(v) =>
+                  setValue(`people.${index}.isResidentInFinland`, v, { shouldValidate: true })
+                }
                 onRemove={index > 0 ? () => remove(index) : undefined}
               />
             ))}
@@ -282,6 +276,9 @@ export default function GuestRegistrationPage() {
             ))}
 
             <Section title={t("section.confirmation")}>
+              <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                {t("confirmation.penaltyNotice")}
+              </p>
               <Checkbox label={t("confirmation.privacy")} error={errors.privacyAccepted?.message} {...register("privacyAccepted")} />
               <Checkbox label={t("confirmation.accuracy")} error={errors.accuracyConfirmed?.message} {...register("accuracyConfirmed")} />
             </Section>
@@ -316,6 +313,8 @@ function PersonSection({
   guestType,
   locale,
   t,
+  isResident,
+  onResidentChange,
   onRemove,
 }: {
   index: number;
@@ -324,6 +323,8 @@ function PersonSection({
   guestType: PersonForm["guestType"];
   locale: string;
   t: (key: string, opts?: Record<string, unknown>) => string;
+  isResident: boolean | undefined;
+  onResidentChange: (value: boolean) => void;
   onRemove?: () => void;
 }) {
   const isAdult = guestType === "primary" || guestType === "additional_adult";
@@ -331,6 +332,19 @@ function PersonSection({
   const title =
     index === 0 ? t("section.primaryGuest") : t(`guestType.${guestType}`);
   const countries = countryOptions(locale);
+  const residencyButton = (value: boolean, label: string) => (
+    <button
+      type="button"
+      onClick={() => onResidentChange(value)}
+      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium ${
+        isResident === value
+          ? "border-blue-600 bg-blue-50 text-blue-700"
+          : "border-slate-300 text-slate-600 hover:bg-slate-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <Section
@@ -352,6 +366,22 @@ function PersonSection({
         </Field>
       </div>
 
+      {/* Residency drives the conditional fields below; an explicit choice is required. */}
+      {isAdult && (
+        <div>
+          <span className="mb-1 block text-sm font-medium text-slate-700">
+            {t("field.residencyQuestion")}
+          </span>
+          <div className="flex gap-2">
+            {residencyButton(true, t("field.residentYes"))}
+            {residencyButton(false, t("field.residentNo"))}
+          </div>
+          {pe?.isResidentInFinland?.message && (
+            <p className="mt-1 text-sm text-red-600">{pe.isResidentInFinland.message}</p>
+          )}
+        </div>
+      )}
+
       {/* Identity is PIC-or-DOB: provide exactly one. */}
       <Field label={t("field.dateOfBirth")} error={pe?.dateOfBirth?.message} hint={t("field.identityHint")}>
         <input type="date" className={inputClass} {...register(`people.${index}.dateOfBirth`)} />
@@ -362,22 +392,24 @@ function PersonSection({
 
       {isAdult && (
         <>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" {...register(`people.${index}.isResidentInFinland`)} />
-            <span>{t("field.isResidentInFinland")}</span>
-          </label>
+          {/* Nationality (field 4) is always required — a Finnish PIC does not encode it. */}
           <Field label={t("field.citizenship")} error={pe?.citizenship?.message}>
             <CountrySelect options={countries} placeholder={t("field.countrySelect")} {...register(`people.${index}.citizenship`)} />
-          </Field>
-          <Field label={t("field.countryOfEntry")} error={pe?.countryOfEntryToFinland?.message}>
-            <CountrySelect options={countries} placeholder={t("field.countrySelect")} {...register(`people.${index}.countryOfEntryToFinland`)} />
           </Field>
           <Field label={t("field.address")} error={pe?.address?.message}>
             <input className={inputClass} {...register(`people.${index}.address`)} />
           </Field>
-          <Field label={t("field.documentNumber")} error={pe?.documentNumber?.message}>
-            <input className={inputClass} {...register(`people.${index}.documentNumber`)} />
-          </Field>
+          {/* Country of entry (field 12) and passport/ID (field 6) apply only to non-residents. */}
+          {isResident === false && (
+            <>
+              <Field label={t("field.countryOfEntry")} error={pe?.countryOfEntryToFinland?.message}>
+                <CountrySelect options={countries} placeholder={t("field.countrySelect")} {...register(`people.${index}.countryOfEntryToFinland`)} />
+              </Field>
+              <Field label={t("field.documentNumber")} error={pe?.documentNumber?.message}>
+                <input className={inputClass} {...register(`people.${index}.documentNumber`)} />
+              </Field>
+            </>
+          )}
         </>
       )}
     </Section>

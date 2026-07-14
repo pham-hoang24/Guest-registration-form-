@@ -14,6 +14,15 @@ export default function SignatureField({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const padRef = useRef<SignaturePad | null>(null);
+  // Callers typically pass an inline arrow function, so its identity changes
+  // on every parent re-render (e.g. every time this very onChange fires and
+  // updates parent state). Reading through a ref keeps the setup effect below
+  // from depending on that identity — otherwise the pad gets torn down and
+  // rebuilt (canvas wiped via canvas.width reset) right after each stroke.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -32,14 +41,16 @@ export default function SignatureField({
 
     const pad = new SignaturePad(canvas, { backgroundColor: "rgba(255,255,255,1)" });
     padRef.current = pad;
-    pad.addEventListener("endStroke", () => onChange(pad.isEmpty() ? "" : pad.toDataURL("image/png")));
+    pad.addEventListener("endStroke", () =>
+      onChangeRef.current(pad.isEmpty() ? "" : pad.toDataURL("image/png")),
+    );
 
     window.addEventListener("resize", resize);
     return () => {
       window.removeEventListener("resize", resize);
       pad.off();
     };
-  }, [onChange]);
+  }, []);
 
   const clear = () => {
     padRef.current?.clear();

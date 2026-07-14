@@ -71,10 +71,7 @@ export default function SubmissionDetailPage() {
               <Item label="Property" value={`${detail.property.name}, ${detail.property.city}`} />
               <Item label="Status" value={detail.status} />
               <Item label="Arrival" value={detail.arrivalDate} />
-              <Item
-                label="Departure"
-                value={detail.departureDateKnown ? detail.departureDate ?? "—" : "Not known yet"}
-              />
+              <Item label="Departure" value={detail.departureDate ?? "—"} />
               <Item label="Purpose" value={detail.purposeOfStay ?? "—"} />
               <Item label="Submitted" value={new Date(detail.submittedAt).toLocaleString()} />
               <Item label="Requirement version" value={detail.requirementVersion} />

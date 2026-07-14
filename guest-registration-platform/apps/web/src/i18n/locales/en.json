@@ -11,7 +11,6 @@
   "field": {
     "arrivalDate": "Arrival date",
     "departureDate": "Departure date",
-    "departureKnownToggle": "I know my departure date",
     "purposeOfStay": "Purpose of stay",
     "email": "Email",
     "phone": "Phone",
@@ -28,7 +27,9 @@
     "documentNumber": "Document number",
     "finnishPic": "Finnish personal identity code",
     "finnishPicHint": "If available; otherwise give a date of birth above. Do not invent one.",
-    "isResidentInFinland": "I am a resident in Finland"
+    "residencyQuestion": "Are you a resident of Finland?",
+    "residentYes": "I am a resident of Finland",
+    "residentNo": "I am NOT a resident of Finland"
   },
   "guestType": {
     "primary": "Primary guest",
@@ -57,7 +58,8 @@
   },
   "confirmation": {
     "privacy": "I accept the privacy notice and understand my data is processed to meet accommodation registration obligations.",
-    "accuracy": "I confirm the information provided is accurate."
+    "accuracy": "I confirm the information provided is accurate.",
+    "penaltyNotice": "Providing incorrect personal data is subject to penalty under the Penal Code."
   },
   "action": {
     "review": "Review and sign",

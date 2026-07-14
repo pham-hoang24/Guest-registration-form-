@@ -11,7 +11,6 @@
   "field": {
     "arrivalDate": "Ankomstdatum",
     "departureDate": "Avresedatum",
-    "departureKnownToggle": "Jag vet mitt avresedatum",
     "purposeOfStay": "Syfte med vistelsen",
     "email": "E-post",
     "phone": "Telefon",
@@ -28,7 +27,9 @@
     "documentNumber": "Dokumentnummer",
     "finnishPic": "Finskt personnummer",
     "finnishPicHint": "Om du har ett; annars ange födelsedatum ovan. Hitta inte på ett.",
-    "isResidentInFinland": "Jag är bosatt i Finland"
+    "residencyQuestion": "Är du bosatt i Finland?",
+    "residentYes": "Jag är bosatt i Finland",
+    "residentNo": "Jag är INTE bosatt i Finland"
   },
   "guestType": {
     "primary": "Primär gäst",
@@ -57,7 +58,8 @@
   },
   "confirmation": {
     "privacy": "Jag accepterar integritetspolicyn och förstår att mina uppgifter behandlas för att uppfylla registreringsskyldigheten.",
-    "accuracy": "Jag bekräftar att den angivna informationen är korrekt."
+    "accuracy": "Jag bekräftar att den angivna informationen är korrekt.",
+    "penaltyNotice": "Att lämna felaktiga personuppgifter är straffbart enligt strafflagen."
   },
   "action": {
     "review": "Granska och signera",

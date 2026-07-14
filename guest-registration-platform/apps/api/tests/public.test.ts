@@ -360,31 +360,8 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(await testDb.passengerCard.count({ where: { guestSubmissionId: stay.id } })).toBe(1);
   });
 
-  it("201 for an unknown-departure stay (departureDateKnown=false)", async () => {
-    const rawToken = generateRegistrationToken();
-    const { stay } = await createRegistrationLinkWithStay(testDb, {
-      tenantId: fx.tenantA.id,
-      propertyId: fx.propertyA.id,
-      tokenHash: hashRegistrationToken(rawToken),
-      arrivalDate: new Date("2026-09-01"),
-      departureDateKnown: false,
-    });
-    const { payload, signatures } = buildMultipartSubmission({
-      arrivalDate: "2026-09-01",
-      departureDateKnown: false,
-    });
-    const res = await postSubmission(rawToken, payload, signatures);
-    expect(res.status).toBe(201);
-    const persisted = await testDb.guestSubmission.findUnique({ where: { id: stay.id } });
-    expect(persisted!.departureDate).toBeNull();
-    expect(persisted!.departureDateKnown).toBe(false);
-  });
-
-  it("400 when departure is marked known but no date is provided", async () => {
-    const { payload, signatures } = buildMultipartSubmission({
-      departureDateKnown: true,
-      departureDate: undefined,
-    });
+  it("400 when departureDate is missing (always required)", async () => {
+    const { payload, signatures } = buildMultipartSubmission({ departureDate: undefined });
     const res = await postSubmission(fx.rawTokenA, payload, signatures);
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("validation_failed");
@@ -407,12 +384,12 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     expect(card!.countryOfEntryNotApplicableReason).toBe("RESIDENT_IN_FINLAND");
   });
 
-  it("PIC path: encrypts the PIC, stores null DOB + HAS_FINNISH_PIC, and never logs the PIC", async () => {
+  it("PIC path: encrypts the PIC, stores null DOB, and never logs the PIC (Nordic citizen exempts field 6)", async () => {
     const PIC = "120490-1235";
     const { payload, signatures } = buildMultipartSubmission({
       primaryOverrides: {
         dateOfBirth: undefined,
-        citizenship: undefined,
+        citizenship: "SE",
         documentNumber: undefined,
         isResidentInFinland: false,
         countryOfEntryToFinland: "SE",
@@ -428,15 +405,31 @@ describe("POST /v1/public/registration-links/:token/submissions", () => {
     // PIC is envelope-encrypted, never plaintext.
     expect(guest!.finnishPersonalIdentityCodeEncrypted).not.toBeNull();
     expect(guest!.finnishPersonalIdentityCodeEncrypted).not.toContain(PIC);
-    // A PIC holder needs no travel document — nothing stored, reason recorded.
+    // Exempt from field 6 as a Nordic citizen — NOT because of the PIC (Fix 4).
     expect(guest!.documentNumberEncrypted).toBeNull();
-    expect(guest!.documentNumberNotApplicableReason).toBe("HAS_FINNISH_PIC");
+    expect(guest!.documentNumberNotApplicableReason).toBe("NORDIC_CITIZEN");
 
     // The raw PIC never appears in any audit row.
     const audits = await testDb.auditLog.findMany();
     for (const audit of audits) {
       expect(JSON.stringify(audit)).not.toContain(PIC);
     }
+  });
+
+  it("400 for a non-resident, non-Nordic (Vietnamese) card holder with a Finnish PIC but no document number (Fix 4)", async () => {
+    const { payload, signatures } = buildMultipartSubmission({
+      primaryOverrides: {
+        dateOfBirth: undefined,
+        citizenship: "VN",
+        documentNumber: undefined,
+        isResidentInFinland: false,
+        countryOfEntryToFinland: "VN",
+        finnishPersonalIdentityCode: "120490-1235",
+      },
+    });
+    const res = await postSubmission(fx.rawTokenA, payload, signatures);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("validation_failed");
   });
 
   it("Nordic non-resident: records NORDIC_CITIZEN and stores no document number", async () => {

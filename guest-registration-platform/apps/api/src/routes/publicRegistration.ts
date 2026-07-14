@@ -192,15 +192,13 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
       const payload = parsed.data;
 
       // 4. Confirm stay fields match the pre-created GuestSubmission.
-      // Departure is nullable (unknown-departure stays); compare the known-flag
-      // and the date (both null when unknown).
+      // Departure is always supplied by the guest and by the owner-created link.
       const stayDeparture = stay.departureDate
         ? stay.departureDate.toISOString().slice(0, 10)
         : null;
       if (
         payload.arrivalDate !== stay.arrivalDate.toISOString().slice(0, 10) ||
-        payload.departureDateKnown !== stay.departureDateKnown ||
-        (payload.departureDate ?? null) !== stayDeparture ||
+        payload.departureDate !== stayDeparture ||
         (stay.purposeOfStay && payload.purposeOfStay !== stay.purposeOfStay)
       ) {
         sendError(res, 409, "stay_fields_mismatch");
@@ -393,7 +391,6 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
                   const applicability = documentNumberApplicability({
                     isResidentInFinland: person.isResidentInFinland,
                     citizenship: person.citizenship ?? null,
-                    finnishPersonalIdentityCode: person.finnishPersonalIdentityCode ?? null,
                   });
                   documentNumberNotApplicableReason = applicability.notApplicableReason;
                   if (applicability.required && person.documentNumber) {

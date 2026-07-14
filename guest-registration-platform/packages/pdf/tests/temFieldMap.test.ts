@@ -19,7 +19,6 @@ const base: RegistrationCardPdfInput = {
   },
   arrivalDate: "2026-07-20",
   departureDate: "2026-07-23",
-  departureDateKnown: true,
   purposeOfStay: "Leisure",
   countryOfEntryToFinland: "SE",
   countryOfEntryNotApplicableReason: null,
@@ -102,9 +101,9 @@ describe("mapCardToTemFields", () => {
     expect(fieldValue(f.holder, "picOrDob")).toBe("120490-1235");
   });
 
-  it("blanks the departure field when departure is not known", () => {
-    const f = mapCardToTemFields({ ...base, departureDate: null, departureDateKnown: false });
-    expect(fieldValue(f.stay, "departureDate")).toBe("");
+  it("always renders the departure date (no longer optional)", () => {
+    const f = mapCardToTemFields({ ...base, departureDate: "2026-08-01" });
+    expect(fieldValue(f.stay, "departureDate")).toBe("2026-08-01");
   });
 
   it("projects spouse/minor riders as name + PIC-or-DOB only, numbered from 7", () => {

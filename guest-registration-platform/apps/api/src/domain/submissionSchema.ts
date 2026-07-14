@@ -118,13 +118,11 @@ function validateIdentity(
 }
 
 function validateAdultFields(data: AdultPerson, ctx: z.RefinementCtx, path: (string | number)[]) {
-  const hasPic = Boolean(data.finnishPersonalIdentityCode);
-
-  // Citizenship is required only when the person is identified by date of birth.
-  if (!hasPic && !data.citizenship) {
+  // Nationality (field 4) is always required — a Finnish PIC does not encode it.
+  if (!data.citizenship) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "citizenship is required when no Finnish personal identity code is provided",
+      message: "citizenship is required",
       path: [...path, "citizenship"],
     });
   }
@@ -139,16 +137,15 @@ function validateAdultFields(data: AdultPerson, ctx: z.RefinementCtx, path: (str
     });
   }
 
-  // Document number: only determinable once identity basis is known (PIC, or citizenship).
-  if (hasPic || data.citizenship) {
-    const doc = documentNumberApplicability(data);
-    if (doc.required && !data.documentNumber) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "documentNumber is required for non-resident, non-Nordic travelers without a PIC",
-        path: [...path, "documentNumber"],
-      });
-    }
+  // Passport / ID number (field 6): required for non-resident, non-Nordic travelers.
+  // Holding a Finnish PIC does NOT exempt field 6.
+  const doc = documentNumberApplicability(data);
+  if (doc.required && !data.documentNumber) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "documentNumber is required for non-resident, non-Nordic travelers",
+      path: [...path, "documentNumber"],
+    });
   }
 }
 
@@ -161,8 +158,7 @@ function validateAdultFields(data: AdultPerson, ctx: z.RefinementCtx, path: (str
 export const payloadSchema = z
   .object({
     arrivalDate: isoDateSchema,
-    departureDate: isoDateSchema.optional(),
-    departureDateKnown: z.boolean(),
+    departureDate: isoDateSchema,
     purposeOfStay: z.enum(PURPOSES_OF_STAY),
     privacyAccepted: z.literal(true, {
       errorMap: () => ({ message: "Privacy notice must be accepted" }),
@@ -174,16 +170,9 @@ export const payloadSchema = z
   })
   .strict()
   .superRefine((data, ctx) => {
-    // Departure is optional only when explicitly marked unknown. Same-day stays
-    // are allowed (departure == arrival); only an earlier departure is rejected.
-    if (data.departureDateKnown && !data.departureDate) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Departure date is required when known",
-        path: ["departureDate"],
-      });
-    }
-    if (data.departureDate && data.departureDate < data.arrivalDate) {
+    // Departure is always required. Same-day stays are allowed
+    // (departure == arrival); only an earlier departure is rejected.
+    if (data.departureDate < data.arrivalDate) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Departure date cannot be before arrival date",

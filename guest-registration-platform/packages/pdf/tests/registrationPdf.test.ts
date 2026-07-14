@@ -24,7 +24,6 @@ const input: RegistrationCardPdfInput = {
   },
   arrivalDate: "2026-07-20",
   departureDate: "2026-07-23",
-  departureDateKnown: true,
   purposeOfStay: "Leisure",
   countryOfEntryToFinland: "SE",
   countryOfEntryNotApplicableReason: null,
@@ -51,11 +50,9 @@ describe("generateRegistrationPdf", () => {
     expect(Buffer.from(bytes.subarray(0, 5)).toString("ascii")).toBe("%PDF-");
   });
 
-  it("renders unknown-departure and country-exception cards", async () => {
+  it("renders country-exception cards", async () => {
     const bytes = await generateRegistrationPdf({
       ...input,
-      departureDate: null,
-      departureDateKnown: false,
       countryOfEntryToFinland: null,
       countryOfEntryNotApplicableReason: "NORDIC_CITIZEN",
     });

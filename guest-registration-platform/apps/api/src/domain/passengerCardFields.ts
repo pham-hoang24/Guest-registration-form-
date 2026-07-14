@@ -26,23 +26,20 @@ export function personBirthDate(p: {
   return null;
 }
 
-export type DocumentNumberNotApplicableReason =
-  | "RESIDENT_IN_FINLAND"
-  | "HAS_FINNISH_PIC"
-  | "NORDIC_CITIZEN";
+export type DocumentNumberNotApplicableReason = "RESIDENT_IN_FINLAND" | "NORDIC_CITIZEN";
 
 /**
- * Whether an adult must supply a travel document number, and if not, the
- * internal reason recorded instead of a silent null. Precedence: resident →
- * Finnish PIC → Nordic citizen.
+ * Whether an adult must supply a travel document number (field 6), and if not,
+ * the internal reason recorded instead of a silent null. Exempt ONLY when
+ * resident in Finland or a Nordic citizen (TEM footnote 1) — precedence resident
+ * → Nordic. Holding a Finnish personal identity code does NOT exempt field 6;
+ * the PIC governs field-3 identity only.
  */
 export function documentNumberApplicability(a: {
   isResidentInFinland: boolean;
   citizenship?: string | null;
-  finnishPersonalIdentityCode?: string | null;
 }): { required: boolean; notApplicableReason: DocumentNumberNotApplicableReason | null } {
   if (a.isResidentInFinland) return { required: false, notApplicableReason: "RESIDENT_IN_FINLAND" };
-  if (a.finnishPersonalIdentityCode) return { required: false, notApplicableReason: "HAS_FINNISH_PIC" };
   if (isNordicCitizenship(a.citizenship)) return { required: false, notApplicableReason: "NORDIC_CITIZEN" };
   return { required: true, notApplicableReason: null };
 }

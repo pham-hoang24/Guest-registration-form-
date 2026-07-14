@@ -17,7 +17,6 @@ const primary = {
 const base = {
   arrivalDate: "2026-07-20",
   departureDate: "2026-07-23",
-  departureDateKnown: true,
   purposeOfStay: "Leisure",
   privacyAccepted: true,
   accuracyConfirmed: true,
@@ -44,14 +43,9 @@ describe("payloadSchema — dates", () => {
     expect(parse({ arrivalDate: "2099-01-01", departureDate: "2099-01-02" }).success).toBe(true);
   });
 
-  it("accepts unknown departure (departureDateKnown=false, no departureDate)", () => {
+  it("rejects a missing departureDate (always required)", () => {
     const { departureDate: _omit, ...rest } = base;
-    expect(payloadSchema.safeParse({ ...rest, departureDateKnown: false }).success).toBe(true);
-  });
-
-  it("rejects known departure with no departureDate", () => {
-    const { departureDate: _omit, ...rest } = base;
-    expect(payloadSchema.safeParse({ ...rest, departureDateKnown: true }).success).toBe(false);
+    expect(payloadSchema.safeParse(rest).success).toBe(false);
   });
 });
 
@@ -88,13 +82,22 @@ describe("payloadSchema — age boundaries", () => {
 const VALID_PIC = "120490-1235";
 
 describe("payloadSchema — PIC-or-DOB identity", () => {
-  it("accepts a resident adult identified only by a valid PIC (no DOB, no citizenship)", () => {
-    const { citizenship: _c, countryOfEntryToFinland: _co, dateOfBirth: _d, ...rest } = primary;
+  it("accepts a resident adult identified only by a valid PIC (no DOB), nationality still required", () => {
+    const { countryOfEntryToFinland: _co, dateOfBirth: _d, ...rest } = primary;
     expect(
       parse({
         people: [{ ...rest, isResidentInFinland: true, finnishPersonalIdentityCode: VALID_PIC }],
       }).success,
     ).toBe(true);
+  });
+
+  it("rejects a PIC-identified resident adult with no citizenship (field 4 is always required)", () => {
+    const { citizenship: _c, countryOfEntryToFinland: _co, dateOfBirth: _d, ...rest } = primary;
+    expect(
+      parse({
+        people: [{ ...rest, isResidentInFinland: true, finnishPersonalIdentityCode: VALID_PIC }],
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects a person providing both a DOB and a PIC", () => {
@@ -135,7 +138,7 @@ describe("payloadSchema — PIC-or-DOB identity", () => {
   });
 
   it("derives age from the PIC: a PIC-identified adult born 1990 passes the 18+ rule", () => {
-    const { dateOfBirth: _d, citizenship: _c, countryOfEntryToFinland: _co, ...rest } = primary;
+    const { dateOfBirth: _d, countryOfEntryToFinland: _co, ...rest } = primary;
     expect(
       parse({
         people: [{ ...rest, isResidentInFinland: true, finnishPersonalIdentityCode: VALID_PIC }],
@@ -145,7 +148,7 @@ describe("payloadSchema — PIC-or-DOB identity", () => {
 });
 
 describe("payloadSchema — conditional adult fields", () => {
-  it("requires citizenship when no PIC is provided", () => {
+  it("requires citizenship (field 4) unconditionally", () => {
     const { citizenship: _c, ...rest } = primary;
     expect(parse({ people: [rest] }).success).toBe(false);
   });
@@ -175,6 +178,13 @@ describe("payloadSchema — conditional adult fields", () => {
   it("requires documentNumber for a non-resident, non-Nordic, DOB-identified adult", () => {
     const { documentNumber: _dn, ...rest } = primary;
     expect(parse({ people: [rest] }).success).toBe(false);
+  });
+
+  it("requires documentNumber for a non-resident, non-Nordic adult even with a Finnish PIC (field 6 has no PIC exemption)", () => {
+    const { documentNumber: _dn, dateOfBirth: _d, ...rest } = primary;
+    expect(
+      parse({ people: [{ ...rest, finnishPersonalIdentityCode: VALID_PIC }] }).success,
+    ).toBe(false);
   });
 
   it("rejects an unknown country code for citizenship", () => {

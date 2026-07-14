@@ -11,7 +11,6 @@
   "field": {
     "arrivalDate": "Saapumispäivä",
     "departureDate": "Lähtöpäivä",
-    "departureKnownToggle": "Tiedän lähtöpäiväni",
     "purposeOfStay": "Majoituksen tarkoitus",
     "email": "Sähköposti",
     "phone": "Puhelinnumero",
@@ -28,7 +27,9 @@
     "documentNumber": "Asiakirjanumero",
     "finnishPic": "Suomalainen henkilötunnus",
     "finnishPicHint": "Jos sinulla on; muuten anna syntymäaika yllä. Älä keksi tunnusta.",
-    "isResidentInFinland": "Asun vakituisesti Suomessa"
+    "residencyQuestion": "Oletko Suomessa vakituisesti asuva?",
+    "residentYes": "Asun vakituisesti Suomessa",
+    "residentNo": "En asu vakituisesti Suomessa"
   },
   "guestType": {
     "primary": "Päävieras",
@@ -57,7 +58,8 @@
   },
   "confirmation": {
     "privacy": "Hyväksyn tietosuojailmoituksen ja ymmärrän, että tietojani käsitellään majoitusrekisteröintivelvoitteiden täyttämiseksi.",
-    "accuracy": "Vahvistan, että antamani tiedot ovat oikein."
+    "accuracy": "Vahvistan, että antamani tiedot ovat oikein.",
+    "penaltyNotice": "Virheellisten henkilötietojen antaminen on rangaistavaa rikoslain nojalla."
   },
   "action": {
     "review": "Tarkista ja allekirjoita",

@@ -57,12 +57,13 @@ field 7. The card holder is the only person carrying the full detail set.
 
 Conditional blanks (present but empty — the box stays on the card):
 
-- **Field 6 (passport / ID no.)** is blank when the holder has no document number (e.g. a
-  Nordic citizen who was not required to give one).
+- **Field 6 (passport / ID no.)** is blank ONLY when the holder is resident in Finland or a
+  Nordic citizen (TEM footnote 1). Holding a Finnish personal identity code does **not** blank
+  it — a non-resident, non-Nordic holder must supply a document number even with a PIC.
 - **Field 12 (country of entry)** is blank when the holder is resident in Finland
   (`isResidentInFinland === true` or reason `RESIDENT_IN_FINLAND`). Nordic citizenship does **not**
   blank it — only residency does.
-- **Departure** is blank when the departure date is not known.
+- **Departure** is always required and always rendered (no "unknown departure" state).
 
 **Never rendered on the PDF:** email, phone, `countryOfResidence`, `documentType`, internal
 not-applicable reason codes, and any token/audit data. These are excluded *by construction* — the

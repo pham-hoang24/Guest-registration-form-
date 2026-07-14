@@ -38,8 +38,7 @@ export type RegistrationCardPdfInput = {
     businessId?: string | null;
   };
   arrivalDate: string;
-  departureDate: string | null;
-  departureDateKnown: boolean;
+  departureDate: string;
   purposeOfStay: string;
   countryOfEntryToFinland: string | null;
   countryOfEntryNotApplicableReason: string | null;
@@ -187,6 +186,7 @@ export async function generateRegistrationPdf(input: RegistrationCardPdfInput): 
   drawSectionRule();
   drawText("The card holder confirmed the accuracy of the provided information and accepted the");
   drawText("privacy notice at the time of submission.");
+  drawText("Providing incorrect personal data is subject to penalty under the Penal Code.");
   y -= 8;
   drawText(`Generated: ${input.generatedAt.toISOString()}`, { size: 9 });
 

@@ -15,8 +15,8 @@ import type { RegistrationCardPdfInput, RegistrationPdfPerson } from "./registra
  * projection cannot leak them onto the card.
  *
  * Blank rules that MUST hold (asserted by tests):
- * - Field 6 (passport / ID no.) is blank when the holder has no document number
- *   (Nordic citizen, resident in Finland, or identified by Finnish PIC).
+ * - Field 6 (passport / ID no.) is blank only when the holder is resident in
+ *   Finland or a Nordic citizen. Holding a Finnish PIC does NOT blank field 6.
  * - Field 12 (country of entry) is blank when the holder is resident in Finland.
  */
 
@@ -109,12 +109,7 @@ export function mapCardToTemFields(input: RegistrationCardPdfInput): TemCardFiel
 
   const stay: TemField[] = [
     { no: 13, key: "arrivalDate", label: "Date of arrival", value: input.arrivalDate },
-    {
-      no: 14,
-      key: "departureDate",
-      label: "Date of departure",
-      value: input.departureDateKnown && input.departureDate ? input.departureDate : "",
-    },
+    { no: 14, key: "departureDate", label: "Date of departure", value: input.departureDate },
     { no: 15, key: "purposeOfStay", label: "Purpose of stay", value: input.purposeOfStay || "" },
   ];
 

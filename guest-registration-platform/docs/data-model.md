@@ -13,9 +13,12 @@ Source of truth: `packages/db/prisma/schema.prisma`. All IDs are UUIDs.
   partial unique index (`registration_link_one_active_per_property`) enforces **at most one
   ACTIVE link per property**. The raw token is a secret capability URL shown exactly once.
 - **GuestSubmission** — one stay (a "batch"), created with the active link. `status` ∈ OPEN |
-  CLOSED | EXPIRED. Carries `requirementVersion`, `maxPassengerCards`, `departureDateKnown`,
-  `retainUntil`/`deleteAfter`/`deletedAt`, `legalBasis`. `purposeOfStay` and the
-  `primaryGuest*` contact fields are null until the first card is submitted; contacts are
+  CLOSED | EXPIRED. Carries `requirementVersion`, `maxPassengerCards`,
+  `retainUntil`/`deleteAfter`/`deletedAt`, `legalBasis`. `departureDate` is always required
+  (both the owner-created link and the guest submission enforce it); `departureDateKnown` is
+  a legacy column always persisted `true`. `purposeOfStay` is a required product rule (not a
+  legal requirement — see `packages/shared/src/form-requirements/temPassengerCard.v1.ts`) and
+  the `primaryGuest*` contact fields are null until the first card is submitted; contacts are
   wiped on retention purge.
 - **PassengerCard** — one adult's card within a stay. `status` ∈ SUBMITTED | PDF_READY |
   FAILED. Holds `cardType`, `countryOfEntryToFinland` (+ `countryOfEntryNotApplicableReason`
@@ -24,7 +27,11 @@ Source of truth: `packages/db/prisma/schema.prisma`. All IDs are UUIDs.
 - **Guest** — one person on a card. The card holder carries full detail; spouse/minor children
   are reduced rows. `documentNumberEncrypted` and `finnishPersonalIdentityCodeEncrypted` are
   envelope-encrypted JSON blobs (never plaintext); `dateOfBirth` is null on the PIC path.
-  `documentNumberNotApplicableReason` ∈ RESIDENT_IN_FINLAND | HAS_FINNISH_PIC | NORDIC_CITIZEN.
+  `citizenship` (field 4, nationality) is always required for card holders — a Finnish
+  personal identity code does not encode it. `isResidentInFinland` is an explicit required
+  choice for every adult. `documentNumberNotApplicableReason` ∈ RESIDENT_IN_FINLAND |
+  NORDIC_CITIZEN — exempt ONLY for residents or Nordic citizens; holding a Finnish personal
+  identity code does NOT exempt the document number (field 6).
 - **PassengerCardSignature** — one per card; `signatureEncrypted` (nullable so it can be wiped
   after embedding) + `signatureSha256`.
 - **PdfJob** — one per card; `status` ∈ PENDING | PROCESSING | COMPLETED | FAILED.
