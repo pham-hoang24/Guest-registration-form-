@@ -20,9 +20,12 @@ requests skip CSRF. The CSRF token is returned by login and by `/me` (null for B
   "propertyName": "Example Cabin",
   "propertyCity": "Tampere",
   "requirementVersion": "FI-TEM-PASSENGER-CARD-2026-DRAFT-V1",
-  "supportedLanguages": ["en", "fi", "sv"]
+  "supportedLanguages": ["en", "fi", "sv"],
+  "arrivalDate": "2026-07-20",
+  "departureDate": "2026-07-23"
 }
 ```
+Stay dates are set by the owner when the link is created; the guest form displays them read-only.
 404 `invalid_or_expired_link` — unknown, disabled, and expired tokens are indistinguishable.
 
 ### POST /v1/public/registration-links/:token/submissions

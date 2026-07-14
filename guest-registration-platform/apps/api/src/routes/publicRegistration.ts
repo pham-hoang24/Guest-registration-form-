@@ -115,7 +115,7 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         sendError(res, 404, "registration_link_unavailable");
         return;
       }
-      const { link } = resolved;
+      const { link, stay } = resolved;
 
       // Lightweight structured log only — not an audit table row.
       console.log(
@@ -128,11 +128,19 @@ export function publicRegistrationRoutes(deps: AppDeps): Router {
         }),
       );
 
+      const departureDate = stay.departureDate?.toISOString().slice(0, 10);
+      if (!departureDate) {
+        sendError(res, 404, "registration_link_unavailable");
+        return;
+      }
+
       res.json({
         propertyName: link.property.name,
         propertyCity: link.property.city,
         requirementVersion: REQUIREMENT_VERSION,
         supportedLanguages: SUPPORTED_LANGUAGES,
+        arrivalDate: stay.arrivalDate.toISOString().slice(0, 10),
+        departureDate,
       });
     } catch (error) {
       next(error);

@@ -61,6 +61,9 @@ export const registrationLinkInfoSchema = z.object({
   propertyCity: z.string(),
   requirementVersion: z.string(),
   supportedLanguages: z.array(z.string()),
+  /** Stay dates are fixed when the owner creates the registration link. */
+  arrivalDate: isoDateSchema,
+  departureDate: isoDateSchema,
 });
 
 export type RegistrationLinkInfo = z.infer<typeof registrationLinkInfoSchema>;

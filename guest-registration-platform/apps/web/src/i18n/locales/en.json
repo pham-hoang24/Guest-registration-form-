@@ -11,6 +11,7 @@
   "field": {
     "arrivalDate": "Arrival date",
     "departureDate": "Departure date",
+    "stayDatesHint": "These dates were set by your host and cannot be changed here.",
     "purposeOfStay": "Purpose of stay",
     "email": "Email",
     "phone": "Phone",
@@ -79,6 +80,12 @@
     "successDescCard": "Thank you. Your passenger cards have been received and are being processed.",
     "errorLinkExpired": "This registration link is no longer valid.",
     "errorSignatureMissing": "Please provide a signature for every adult before submitting.",
-    "errorGeneric": "Submission failed. Please try again."
+    "errorGeneric": "Submission failed. Please try again.",
+    "errorValidation": "Some information is missing or invalid. Please check the highlighted fields.",
+    "errorStayMismatch": "Your stay dates do not match this registration link. Use the dates your host provided, or ask for a new link.",
+    "errorSignatureInvalid": "There was a problem with a signature. Please sign again and resubmit.",
+    "errorPartialDuplicate": "Part of this registration was already submitted. Go back, review your guests, and try again.",
+    "errorCapacityExceeded": "This registration link has reached the maximum number of passenger cards.",
+    "errorServer": "Something went wrong on our side. Please try again shortly, or contact your host if the problem continues."
   }
 }

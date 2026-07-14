@@ -51,6 +51,8 @@ describe("GET /v1/public/registration-links/:token", () => {
       propertyCity: "Tampere",
       requirementVersion: REQUIREMENT_VERSION,
       supportedLanguages: ["en", "fi", "sv"],
+      arrivalDate: "2026-07-20",
+      departureDate: "2026-07-23",
     });
     // No IDs or address leak through the public endpoint.
     expect(JSON.stringify(res.body)).not.toContain(fx.tenantA.id);

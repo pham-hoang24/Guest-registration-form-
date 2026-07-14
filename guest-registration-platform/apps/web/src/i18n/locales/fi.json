@@ -11,6 +11,7 @@
   "field": {
     "arrivalDate": "Saapumispäivä",
     "departureDate": "Lähtöpäivä",
+    "stayDatesHint": "Majoittaja on määrittänyt nämä päivämäärät, eikä niitä voi muuttaa täällä.",
     "purposeOfStay": "Majoituksen tarkoitus",
     "email": "Sähköposti",
     "phone": "Puhelinnumero",
@@ -79,6 +80,12 @@
     "successDescCard": "Kiitos. Matkustajakorttisi on vastaanotettu ja niitä käsitellään.",
     "errorLinkExpired": "Tämä rekisteröintilinkki ei ole enää voimassa.",
     "errorSignatureMissing": "Anna allekirjoitus jokaiselle aikuiselle ennen lähettämistä.",
-    "errorGeneric": "Lähetys epäonnistui. Yritä uudelleen."
+    "errorGeneric": "Lähetys epäonnistui. Yritä uudelleen.",
+    "errorValidation": "Joitakin tietoja puuttuu tai ne ovat virheellisiä. Tarkista korostetut kentät.",
+    "errorStayMismatch": "Yöpymispäiväsi eivät vastaa tätä rekisteröintilinkkiä. Käytä isäntäsi antamia päivämääriä tai pyydä uusi linkki.",
+    "errorSignatureInvalid": "Allekirjoituksessa ilmeni ongelma. Allekirjoita uudelleen ja yritä uudelleen.",
+    "errorPartialDuplicate": "Osa tästä rekisteröinnistä on jo lähetetty. Palaa takaisin, tarkista vieraat ja yritä uudelleen.",
+    "errorCapacityExceeded": "Tämä rekisteröintilinkki on saavuttanut matkustajakorttien enimmäismäärän.",
+    "errorServer": "Jokin meni pieleen palvelimella. Yritä hetken kuluttua uudelleen tai ota yhteyttä isäntään."
   }
 }

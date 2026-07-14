@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { useForm, useFieldArray, type UseFormRegister, type FieldErrors } from "react-hook-form";
+import {
+  useForm,
+  useFieldArray,
+  type UseFormRegister,
+  type FieldErrors,
+  type FieldPath,
+} from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PURPOSES_OF_STAY, type RegistrationLinkInfo } from "@gr/shared";
-import { ApiError, apiGet, apiPostMultipart } from "../api/client.js";
+import { apiGet, apiPostMultipart } from "../api/client.js";
 import i18n from "../i18n/index.js";
 import SignatureField, { dataUrlToPngBlob } from "./SignatureField.js";
 import {
@@ -16,6 +22,7 @@ import {
   type PersonForm,
 } from "./formSchema.js";
 import { countryOptions } from "./countryOptions.js";
+import { guestSubmissionErrorMessage } from "./submissionErrors.js";
 
 type PageState =
   | { kind: "loading" }
@@ -30,6 +37,20 @@ type SupportedLang = (typeof SUPPORTED_UI_LANGS)[number];
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none";
+
+const readOnlyValueClass =
+  "rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-base text-slate-900";
+
+function formatStayDate(iso: string, locale: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!match) return iso;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(
+    new Date(Date.UTC(year, month - 1, day)),
+  );
+}
 
 const emptyPerson = (guestType: PersonForm["guestType"]): PersonForm => ({
   guestType,
@@ -61,7 +82,8 @@ export default function GuestRegistrationPage() {
       people: [emptyPerson("primary")],
     },
   });
-  const { register, handleSubmit, formState, control, watch, trigger, setValue } = form;
+  const { register, handleSubmit, formState, control, watch, setValue, getValues, setError, clearErrors } =
+    form;
   const errors = formState.errors;
   const { fields, append, remove } = useFieldArray({ control, name: "people" });
 
@@ -73,7 +95,11 @@ export default function GuestRegistrationPage() {
       return;
     }
     apiGet<RegistrationLinkInfo>(`/v1/public/registration-links/${token}`)
-      .then((info) => setState({ kind: "form", info }))
+      .then((info) => {
+        setValue("arrivalDate", info.arrivalDate);
+        setValue("departureDate", info.departureDate);
+        setState({ kind: "form", info });
+      })
       .catch(() => setState({ kind: "invalid_link" }));
   }, [token]);
 
@@ -82,10 +108,31 @@ export default function GuestRegistrationPage() {
   }, []);
 
   const goToReview = async () => {
-    // Validate only the fields rendered on step 1. The two confirmation literals
-    // (privacyAccepted / accuracyConfirmed) render on the review step, so a
-    // whole-form trigger() here would fail on their `undefined` values silently.
-    if (await trigger(["arrivalDate", "departureDate", "people"])) setReviewing(true);
+    // Step 1 must run the full registration schema (including superRefine rules
+    // for conditional adult fields). Partial trigger("people") only validates
+    // personFormSchema where those fields are optional at the field level.
+    clearErrors();
+    const values = getValues();
+    const parsed = registrationFormSchema.safeParse({
+      ...values,
+      privacyAccepted: true,
+      accuracyConfirmed: true,
+    });
+    if (!parsed.success) {
+      let firstField: FieldPath<RegistrationForm> | null = null;
+      for (const issue of parsed.error.issues) {
+        const root = issue.path[0];
+        if (root === "privacyAccepted" || root === "accuracyConfirmed") continue;
+        const path = issue.path.join(".") as FieldPath<RegistrationForm>;
+        setError(path, { type: "manual", message: issue.message });
+        firstField ??= path;
+      }
+      if (firstField) {
+        document.querySelector<HTMLElement>(`[name="${firstField}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
+    setReviewing(true);
   };
 
   const onSubmit = handleSubmit(async (data) => {
@@ -121,11 +168,7 @@ export default function GuestRegistrationPage() {
       await apiPostMultipart(`/v1/public/registration-links/${token}/submissions`, fd);
       setState({ kind: "success" });
     } catch (error) {
-      const message =
-        error instanceof ApiError && error.status === 404
-          ? t("status.errorLinkExpired")
-          : t("status.errorGeneric");
-      setState({ kind: "error", info, message });
+      setState({ kind: "error", info, message: guestSubmissionErrorMessage(error, t) });
     }
   });
 
@@ -191,12 +234,13 @@ export default function GuestRegistrationPage() {
         {!reviewing ? (
           <form className="space-y-6" noValidate>
             <Section title={t("section.stay")}>
+              <p className="text-sm text-slate-600">{t("field.stayDatesHint")}</p>
               <div className="grid grid-cols-2 gap-3">
-                <Field label={t("field.arrivalDate")} error={errors.arrivalDate?.message}>
-                  <input type="date" className={inputClass} {...register("arrivalDate")} />
+                <Field label={t("field.arrivalDate")}>
+                  <p className={readOnlyValueClass}>{formatStayDate(info.arrivalDate, currentLang)}</p>
                 </Field>
-                <Field label={t("field.departureDate")} error={errors.departureDate?.message}>
-                  <input type="date" className={inputClass} {...register("departureDate")} />
+                <Field label={t("field.departureDate")}>
+                  <p className={readOnlyValueClass}>{formatStayDate(info.departureDate, currentLang)}</p>
                 </Field>
               </div>
               <Field label={t("field.purposeOfStay")} error={errors.purposeOfStay?.message}>

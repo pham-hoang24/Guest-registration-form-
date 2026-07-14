@@ -4,6 +4,7 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly code: string,
+    public readonly details?: unknown,
   ) {
     super(code);
   }
@@ -23,13 +24,15 @@ function withCsrf(headers: Record<string, string> = {}): Record<string, string> 
 
 async function parseError(response: Response): Promise<never> {
   let code = "request_failed";
+  let details: unknown;
   try {
-    const body = (await response.json()) as { error?: string };
+    const body = (await response.json()) as { error?: string; details?: unknown };
     if (body.error) code = body.error;
+    if (body.details !== undefined) details = body.details;
   } catch {
     // non-JSON error body
   }
-  throw new ApiError(response.status, code);
+  throw new ApiError(response.status, code, details);
 }
 
 export async function apiGet<T>(path: string): Promise<T> {

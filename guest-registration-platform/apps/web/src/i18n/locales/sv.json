@@ -11,6 +11,7 @@
   "field": {
     "arrivalDate": "Ankomstdatum",
     "departureDate": "Avresedatum",
+    "stayDatesHint": "Dessa datum har ställts in av din värd och kan inte ändras här.",
     "purposeOfStay": "Syfte med vistelsen",
     "email": "E-post",
     "phone": "Telefon",
@@ -79,6 +80,12 @@
     "successDescCard": "Tack. Dina passagerarkort har mottagits och behandlas.",
     "errorLinkExpired": "Den här registreringslänken är inte längre giltig.",
     "errorSignatureMissing": "Ange en signatur för varje vuxen innan du skickar.",
-    "errorGeneric": "Inlämning misslyckades. Försök igen."
+    "errorGeneric": "Inlämning misslyckades. Försök igen.",
+    "errorValidation": "Viss information saknas eller är ogiltig. Kontrollera de markerade fälten.",
+    "errorStayMismatch": "Dina vistelsedatum stämmer inte med den här registreringslänken. Använd datumen din värd angav, eller be om en ny länk.",
+    "errorSignatureInvalid": "Det uppstod ett problem med en signatur. Signera igen och skicka på nytt.",
+    "errorPartialDuplicate": "En del av den här registreringen har redan skickats. Gå tillbaka, granska dina gäster och försök igen.",
+    "errorCapacityExceeded": "Den här registreringslänken har nått max antal passagerarkort.",
+    "errorServer": "Något gick fel på vår sida. Försök igen om en stund, eller kontakta din värd om problemet kvarstår."
   }
 }
